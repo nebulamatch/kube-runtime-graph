@@ -84,7 +84,7 @@ func main() {
 			log.Fatalf("Failed to bind raw socket: %v", err)
 		}
 
-		if err := syscall.SetsockoptInt(sock, syscall.SOL_SOCKET, 26 /* SO_ATTACH_BPF */, objs.SocketHttpFilter.FD()); err != nil {
+		if err := syscall.SetsockoptInt(sock, syscall.SOL_SOCKET, 50 /* SO_ATTACH_BPF */, objs.SocketHttpFilter.FD()); err != nil {
 			log.Fatalf("Failed to attach BPF socket filter: %v", err)
 		}
 		log.Println("Successfully attached socket filter to eth0 for L7 interception")
