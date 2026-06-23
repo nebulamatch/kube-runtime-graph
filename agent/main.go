@@ -16,8 +16,7 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 )
 
-// $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang bpf tcptracer.c -- -I/usr/include/bpf
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang bpf tcptracer.c -- -I/usr/include/bpf -D__TARGET_ARCH_x86
 
 type bpfEvent struct {
 	Saddr uint32
