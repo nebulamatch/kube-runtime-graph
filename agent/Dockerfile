@@ -18,6 +18,9 @@ RUN go get github.com/cilium/ebpf/cmd/bpf2go@v0.11.0 \
            k8s.io/api@v0.28.2
 RUN go mod tidy
 
+# Fix for missing asm/types.h during clang eBPF compilation on Debian
+RUN ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/asm
+
 # Generate eBPF Go bindings
 RUN go generate ./...
 
