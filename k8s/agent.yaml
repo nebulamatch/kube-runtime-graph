@@ -47,6 +47,7 @@ spec:
       - name: ghcr-login
       hostNetwork: true
       hostPID: true
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: agent
         image: ghcr.io/nebulamatch/kube-runtime-graph-agent:latest

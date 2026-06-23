@@ -18,6 +18,43 @@ import CustomNode from '../components/CustomNode';
 import { X, Activity, Clock, AlertTriangle } from 'lucide-react';
 import { io } from 'socket.io-client';
 import ClusterSelector from '../components/ClusterSelector';
+import dagre from 'dagre';
+
+const dagreGraph = new dagre.graphlib.Graph();
+dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+const nodeWidth = 250;
+const nodeHeight = 100;
+
+const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => {
+  const isHorizontal = direction === 'LR';
+  dagreGraph.setGraph({ rankdir: direction });
+
+  nodes.forEach((node) => {
+    dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  nodes.forEach((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    node.targetPosition = isHorizontal ? 'left' : 'top';
+    node.sourcePosition = isHorizontal ? 'right' : 'bottom';
+    
+    // Shift position to center
+    node.position = {
+      x: nodeWithPosition.x - nodeWidth / 2,
+      y: nodeWithPosition.y - nodeHeight / 2,
+    };
+    return node;
+  });
+
+  return { nodes, edges };
+};
 
 const nodeTypes = {
   custom: CustomNode,
@@ -56,10 +93,9 @@ export default function App() {
     });
 
     socket.on('graphUpdate', (data: { nodes: Node[], edges: Edge[] }) => {
-      setNodes((currentNodes) => {
-        return data.nodes;
-      });
-      setEdges(data.edges);
+      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(data.nodes, data.edges);
+      setNodes(layoutedNodes);
+      setEdges(layoutedEdges);
     });
 
     socket.on('telemetryUpdate', (payload: any) => {
@@ -69,7 +105,8 @@ export default function App() {
       if (payload.newNodes && Array.isArray(payload.newNodes) && payload.newNodes.length > 0) {
         setNodes((currentNodes) => {
           const toAdd = payload.newNodes.filter((nn: Node) => !currentNodes.some(n => n.id === nn.id));
-          return [...currentNodes, ...toAdd];
+          const { nodes: layoutedNodes } = getLayoutedElements([...currentNodes, ...toAdd], edges);
+          return layoutedNodes;
         });
       }
 

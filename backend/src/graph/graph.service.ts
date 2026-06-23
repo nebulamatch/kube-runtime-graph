@@ -43,6 +43,10 @@ export class GraphService {
       }
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
 
+      // Clear caches to prevent stale/dead pods from lingering
+      this.podCache.clear();
+      this.ipToServiceCache.clear();
+
       // Fetch Services
       const servicesRes: any = await k8sApi.listNamespacedService(namespace);
       const servicesItems = servicesRes.body ? servicesRes.body.items : servicesRes.items;
@@ -177,7 +181,7 @@ export class GraphService {
     }
   }
 
-  async processTelemetry(payload: { sourceIp: string; destIp: string; destPort: number }) {
+  async processTelemetry(payload: { sourceIp: string; destIp: string; destPort: number; method?: string; path?: string }) {
     let sourceNodeId = this.ipToServiceCache.get(payload.sourceIp) || this.podCache.get(payload.sourceIp);
     let destNodeId = this.ipToServiceCache.get(payload.destIp) || this.podCache.get(payload.destIp);
 
@@ -218,8 +222,12 @@ export class GraphService {
           source: sourceNodeId,
           target: destNodeId,
           animated: true,
+          label: payload.method && payload.path ? `${payload.method} ${payload.path}` : undefined,
           style: { stroke: '#10b981', strokeWidth: 3 },
-          data: { port: payload.destPort }
+          data: { 
+            port: payload.destPort,
+            endpoint: payload.method && payload.path ? `${payload.method} ${payload.path}` : undefined
+          }
         },
         newNodes: newNodes.length > 0 ? newNodes : undefined
       };

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/cilium/ebpf/link"
@@ -29,6 +30,16 @@ type TelemetryPayload struct {
 	SourceIp string `json:"sourceIp"`
 	DestIp   string `json:"destIp"`
 	DestPort uint16 `json:"destPort"`
+	Method   string `json:"method,omitempty"`
+	Path     string `json:"path,omitempty"`
+}
+
+type bpfHttpEvent struct {
+	Saddr   uint32
+	Daddr   uint32
+	Dport   uint16
+	Sport   uint16
+	Payload [64]byte
 }
 
 func main() {
@@ -53,17 +64,48 @@ func main() {
 
 	log.Println("Successfully attached kprobe to tcp_v4_connect")
 
-	// Open a ringbuf reader from userspace RINGBUF map
+	// Attach socket filter to eth0
+	iface, err := net.InterfaceByName("eth0")
+	if err != nil {
+		log.Printf("Could not find eth0: %s (skipping L7 capture)", err)
+	} else {
+		sock, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(htons(syscall.ETH_P_ALL)))
+		if err != nil {
+			log.Fatalf("Failed to create raw socket: %v", err)
+		}
+		defer syscall.Close(sock)
+
+		sll := syscall.SockaddrLinklayer{
+			Ifindex:  iface.Index,
+			Protocol: htons(syscall.ETH_P_ALL),
+		}
+		if err := syscall.Bind(sock, &sll); err != nil {
+			log.Fatalf("Failed to bind raw socket: %v", err)
+		}
+
+		if err := syscall.SetsockoptInt(sock, syscall.SOL_SOCKET, 26 /* SO_ATTACH_BPF */, objs.SocketHttpFilter.FD()); err != nil {
+			log.Fatalf("Failed to attach BPF socket filter: %v", err)
+		}
+		log.Println("Successfully attached socket filter to eth0 for L7 interception")
+	}
+
+	// Open ringbuf readers
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
-		log.Fatalf("Opening ringbuf reader: %s", err)
+		log.Fatalf("Opening tcp ringbuf reader: %s", err)
 	}
 	defer rd.Close()
 
-	// Close the reader when the process exits
+	httpRd, err := ringbuf.NewReader(objs.HttpEvents)
+	if err != nil {
+		log.Fatalf("Opening http ringbuf reader: %s", err)
+	}
+	defer httpRd.Close()
+
 	go func() {
 		<-waitSignal()
 		rd.Close()
+		httpRd.Close()
 	}()
 
 	log.Println("Waiting for events...")
@@ -73,41 +115,79 @@ func main() {
 		backendUrl = "http://backend-service:3001/api/telemetry"
 	}
 
+	// Goroutine for L4 TCP Connect events
+	go func() {
+		for {
+			record, err := rd.Read()
+			if err != nil {
+				if err == ringbuf.ErrClosed {
+					return
+				}
+				continue
+			}
+
+			var event bpfEvent
+			if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
+				continue
+			}
+
+			srcIp := intToIP(event.Saddr)
+			dstIp := intToIP(event.Daddr)
+			dport := (event.Dport >> 8) | (event.Dport << 8)
+
+			payload := TelemetryPayload{
+				SourceIp: srcIp.String(),
+				DestIp:   dstIp.String(),
+				DestPort: dport,
+			}
+			go sendTelemetry(backendUrl, payload)
+		}
+	}()
+
+	// Main loop for L7 HTTP events
 	for {
-		record, err := rd.Read()
+		record, err := httpRd.Read()
 		if err != nil {
 			if err == ringbuf.ErrClosed {
 				log.Println("Received signal, exiting..")
 				return
 			}
-			log.Printf("Read from ringbuf failed: %s", err)
 			continue
 		}
 
-		// Parse the event data
-		var event bpfEvent
+		var event bpfHttpEvent
 		if err := binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event); err != nil {
-			log.Printf("Parsing ringbuf event failed: %s", err)
 			continue
 		}
 
 		srcIp := intToIP(event.Saddr)
 		dstIp := intToIP(event.Daddr)
-
-		// Reverse bytes for port due to network byte order
 		dport := (event.Dport >> 8) | (event.Dport << 8)
 
-		log.Printf("TCP Connect: %s -> %s:%d", srcIp, dstIp, dport)
+		rawPayload := string(bytes.Trim(event.Payload[:], "\x00"))
+		parts := strings.SplitN(rawPayload, " ", 3)
+		if len(parts) >= 2 {
+			method := parts[0]
+			path := parts[1]
 
-		// Send to Backend
-		payload := TelemetryPayload{
-			SourceIp: srcIp.String(),
-			DestIp:   dstIp.String(),
-			DestPort: dport,
+			log.Printf("HTTP Intercept: %s %s -> %s:%d %s", method, srcIp, dstIp, dport, path)
+
+			payload := TelemetryPayload{
+				SourceIp: srcIp.String(),
+				DestIp:   dstIp.String(),
+				DestPort: dport,
+				Method:   method,
+				Path:     path,
+			}
+			go sendTelemetry(backendUrl, payload)
 		}
-
-		go sendTelemetry(backendUrl, payload)
 	}
+}
+
+func htons(i uint16) uint16 {
+	b := make([]byte, 2)
+	binary.BigEndian.PutUint16(b, i)
+	return *(*uint16)(unsafe.Pointer(&b[0]))
 }
 
 func intToIP(ip uint32) net.IP {
