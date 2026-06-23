@@ -10,6 +10,9 @@ export class KubeService {
       const kc = new k8s.KubeConfig();
       kc.loadFromDefault();
       const contexts = kc.getContexts();
+      if (contexts.length === 0) {
+        return [{ name: 'in-cluster', cluster: 'in-cluster', user: 'service-account' }];
+      }
       return contexts.map((c) => ({
         name: c.name,
         cluster: c.cluster,
@@ -25,7 +28,9 @@ export class KubeService {
     try {
       const kc = new k8s.KubeConfig();
       kc.loadFromDefault();
-      kc.setCurrentContext(contextName);
+      if (contextName && contextName !== 'in-cluster') {
+        kc.setCurrentContext(contextName);
+      }
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
       const res: any = await k8sApi.listNamespace();
       const items = res.body ? res.body.items : res.items;
@@ -43,7 +48,9 @@ export class KubeService {
     try {
       const kc = new k8s.KubeConfig();
       kc.loadFromDefault();
-      kc.setCurrentContext(contextName);
+      if (contextName && contextName !== 'in-cluster') {
+        kc.setCurrentContext(contextName);
+      }
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
       const res: any = await k8sApi.listNamespacedPod(namespace);
       const items = res.body ? res.body.items : res.items;
@@ -65,7 +72,9 @@ export class KubeService {
     try {
       const kc = new k8s.KubeConfig();
       kc.loadFromDefault();
-      kc.setCurrentContext(contextName);
+      if (contextName && contextName !== 'in-cluster') {
+        kc.setCurrentContext(contextName);
+      }
       const log = new k8s.Log(kc);
       const logStream = new stream.PassThrough();
       logStream.on('data', (chunk) => {

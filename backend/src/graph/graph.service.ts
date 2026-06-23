@@ -38,7 +38,9 @@ export class GraphService {
     try {
       const kc = new k8s.KubeConfig();
       kc.loadFromDefault();
-      kc.setCurrentContext(contextName);
+      if (contextName && contextName !== 'in-cluster') {
+        kc.setCurrentContext(contextName);
+      }
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
 
       // Fetch Services
