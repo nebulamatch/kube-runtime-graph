@@ -7,6 +7,7 @@
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_endian.h>
 #include <linux/if_ether.h>
+#include <linux/in.h>
 #include <linux/ip.h>
 #include <linux/tcp.h>
 
