@@ -10,8 +10,12 @@ RUN go mod download || true
 
 COPY . .
 
-# Download missing dependencies
-RUN go get github.com/cilium/ebpf/cmd/bpf2go github.com/cilium/ebpf k8s.io/client-go k8s.io/apimachinery k8s.io/api
+# Download missing dependencies with explicit pinned versions to avoid Go 1.24+ errors
+RUN go get github.com/cilium/ebpf/cmd/bpf2go@v0.11.0 \
+           github.com/cilium/ebpf@v0.11.0 \
+           k8s.io/client-go@v0.28.2 \
+           k8s.io/apimachinery@v0.28.2 \
+           k8s.io/api@v0.28.2
 RUN go mod tidy
 
 # Generate eBPF Go bindings

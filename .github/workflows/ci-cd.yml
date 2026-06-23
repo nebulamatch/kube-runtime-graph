@@ -34,6 +34,7 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-agent:latest
 
   build-and-push-backend:
+    needs: build-and-push-agent
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -55,6 +56,7 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:latest
 
   build-and-push-frontend:
+    needs: build-and-push-backend
     runs-on: ubuntu-latest
     permissions:
       contents: read
