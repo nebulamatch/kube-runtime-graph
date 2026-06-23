@@ -18,28 +18,25 @@ import CustomNode from '../components/CustomNode';
 import { X, Activity, Clock, AlertTriangle } from 'lucide-react';
 import { io } from 'socket.io-client';
 import ClusterSelector from '../components/ClusterSelector';
-import { useSession } from 'next-auth/react';
 
 const nodeTypes = {
   custom: CustomNode,
 };
 
 interface SelectionState {
-  selectedSub?: string;
-  selectedCluster?: string;
+  selectedContext?: string;
   selectedNamespace?: string;
 }
 
 export default function App() {
-  const { data: session } = useSession();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selection, setSelection] = useState<SelectionState>({});
 
   useEffect(() => {
-    // Only connect if a namespace is selected
-    if (!selection.selectedNamespace) {
+    // Only connect if a namespace and context are selected
+    if (!selection.selectedNamespace || !selection.selectedContext) {
       setNodes([]);
       setEdges([]);
       return;
@@ -49,20 +46,75 @@ export default function App() {
 
     socket.on('connect', () => {
       console.log('Connected to Backend WebSocket');
+      socket.emit('requestUpdate', {
+        context: selection.selectedContext,
+        namespace: selection.selectedNamespace
+      });
     });
 
     socket.on('graphUpdate', (data: { nodes: Node[], edges: Edge[] }) => {
-      // If a pod is clicked (selectedNodeId), filter the graph to only show its connections
-      setNodes(data.nodes);
+      setNodes((currentNodes) => {
+        return data.nodes;
+      });
       setEdges(data.edges);
+    });
+
+    socket.on('telemetryUpdate', (newEdge: Edge) => {
+      setEdges((currentEdges) => {
+        // Find if this edge exists
+        const existingEdgeIndex = currentEdges.findIndex(e => e.id === newEdge.id || (e.source === newEdge.source && e.target === newEdge.target));
+        
+        let updatedEdges = [...currentEdges];
+        if (existingEdgeIndex >= 0) {
+          updatedEdges[existingEdgeIndex] = { ...updatedEdges[existingEdgeIndex], animated: true };
+        } else {
+          updatedEdges.push(newEdge);
+        }
+
+        // After 2 seconds, remove animation to simulate single request burst
+        setTimeout(() => {
+          setEdges(edges => edges.map(e => {
+            if (e.id === newEdge.id || (e.source === newEdge.source && e.target === newEdge.target)) {
+              return { ...e, animated: false };
+            }
+            return e;
+          }));
+        }, 2000);
+
+        return updatedEdges;
+      });
     });
 
     return () => {
       socket.disconnect();
     };
-  }, [selection.selectedNamespace, setNodes, setEdges]);
+  }, [selection.selectedNamespace, selection.selectedContext, setNodes, setEdges]);
 
-  const selectedNode = nodes.find(n => n.id === selectedNodeId) || null;
+  const rawNodes = nodes;
+  const rawEdges = edges;
+
+  const selectedNode = rawNodes.find(n => n.id === selectedNodeId) || null;
+
+  // Filter nodes and edges based on selection
+  let displayNodes = rawNodes;
+  let displayEdges = rawEdges;
+
+  if (selectedNodeId) {
+    // Find all edges connected to the selected node
+    const connectedEdges = rawEdges.filter(
+      e => e.source === selectedNodeId || e.target === selectedNodeId
+    );
+    
+    // Find all node IDs that are part of these connected edges
+    const connectedNodeIds = new Set([selectedNodeId]);
+    connectedEdges.forEach(e => {
+      connectedNodeIds.add(e.source);
+      connectedNodeIds.add(e.target);
+    });
+
+    displayNodes = rawNodes.filter(n => connectedNodeIds.has(n.id));
+    displayEdges = connectedEdges;
+  }
 
   const onConnect = useCallback((params: Edge | Connection) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
 
@@ -78,9 +130,9 @@ export default function App() {
     <div className={styles.pageWrapper} style={{ flexDirection: 'column' }}>
       <ClusterSelector onSelectionChange={setSelection} />
       
-      {!selection.selectedNamespace && session ? (
+      {!selection.selectedNamespace ? (
         <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-          Please select a Subscription, Cluster, and Namespace to view the runtime graph.
+          Please select a Kubeconfig Context and Namespace to view the runtime graph.
         </div>
       ) : null}
 
@@ -88,8 +140,8 @@ export default function App() {
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <div className={styles.graphContainer}>
           <ReactFlow
-          nodes={nodes}
-          edges={edges}
+          nodes={displayNodes}
+          edges={displayEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}

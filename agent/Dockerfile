@@ -1,14 +1,24 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.21-bullseye AS builder
 
 WORKDIR /app
+
+# Install dependencies for eBPF compilation
+RUN apt-get update && apt-get install -y clang llvm libbpf-dev linux-headers-generic
+
 COPY go.mod ./
-# COPY go.sum ./
-# RUN go mod download
+RUN go mod download
 
 COPY . .
-RUN go build -o agent main.go
 
-FROM alpine:latest
+# Generate eBPF Go bindings
+RUN go generate ./...
+
+# Build the agent
+RUN go build -o agent main.go bpf_bpfel.go
+
+FROM debian:bullseye-slim
 WORKDIR /app
 COPY --from=builder /app/agent .
+
+# The agent needs to run as privileged to access BPF subsystem
 CMD ["./agent"]

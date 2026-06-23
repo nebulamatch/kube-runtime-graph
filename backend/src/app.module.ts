@@ -2,10 +2,10 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { GraphModule } from './graph/graph.module';
-import { AzureModule } from './azure/azure.module';
+import { KubeModule } from './kube/kube.module';
 
 @Module({
-  imports: [GraphModule, AzureModule],
+  imports: [GraphModule, KubeModule],
   controllers: [AppController],
   providers: [AppService],
 })

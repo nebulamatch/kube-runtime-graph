@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-runtime-graph-agent
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-runtime-graph-agent
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "namespaces"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-runtime-graph-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-runtime-graph-agent
+subjects:
+- kind: ServiceAccount
+  name: kube-runtime-graph-agent
+  namespace: kube-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-runtime-graph-agent
+  namespace: kube-system
+  labels:
+    app: kube-runtime-graph-agent
+spec:
+  selector:
+    matchLabels:
+      app: kube-runtime-graph-agent
+  template:
+    metadata:
+      labels:
+        app: kube-runtime-graph-agent
+    spec:
+      serviceAccountName: kube-runtime-graph-agent
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - name: agent
+        image: ghcr.io/biswa/kube-runtime-graph-agent:latest
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+              - SYS_ADMIN
+              - BPF
+        env:
+        - name: BACKEND_URL
+          value: "http://kube-runtime-graph-backend.kube-system.svc.cluster.local:3001/api/telemetry"
+        volumeMounts:
+        - name: sys-kernel-debug
+          mountPath: /sys/kernel/debug
+      volumes:
+      - name: sys-kernel-debug
+        hostPath:
+          path: /sys/kernel/debug

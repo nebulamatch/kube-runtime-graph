@@ -1,17 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useSession } from 'next-auth/react';
 
-interface Subscription {
-  id: string;
+interface KubeContext {
   name: string;
-}
-
-interface Cluster {
-  id: string;
-  name: string;
-  resourceGroup: string;
+  cluster: string;
+  user: string;
 }
 
 interface Namespace {
@@ -19,110 +13,87 @@ interface Namespace {
 }
 
 interface Selection {
-  selectedSub: string;
-  selectedCluster: string;
+  selectedContext: string;
   selectedNamespace: string;
 }
 
 export default function ClusterSelector({ onSelectionChange }: { onSelectionChange: (selection: Selection) => void }) {
-  const { data: session } = useSession();
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
-  const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [contexts, setContexts] = useState<KubeContext[]>([]);
   const [namespaces, setNamespaces] = useState<Namespace[]>([]);
 
-  const [selectedSub, setSelectedSub] = useState('');
-  const [selectedCluster, setSelectedCluster] = useState('');
+  const [selectedContext, setSelectedContext] = useState('');
   const [selectedNamespace, setSelectedNamespace] = useState('');
-
-  // Use the mocked data for now, but in reality we would use the token
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const token = (session as any)?.accessToken || 'mock-token';
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
-    if (session) {
-      fetch('http://localhost:3001/api/azure/subscriptions', {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      .then(res => res.json())
-      .then(setSubscriptions)
-      .catch(console.error);
-    }
-  }, [session, token]);
-
-  useEffect(() => {
-    if (selectedSub) {
-      fetch(`http://localhost:3001/api/azure/subscriptions/${selectedSub}/clusters`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      .then(res => res.json())
-      .then(setClusters)
-      .catch(console.error);
-    }
-  }, [selectedSub, token]);
-
-  useEffect(() => {
-    if (selectedSub && selectedCluster) {
-      const cluster = clusters.find(c => c.id === selectedCluster);
-      if (cluster) {
-        fetch(`http://localhost:3001/api/azure/subscriptions/${selectedSub}/resourceGroups/${cluster.resourceGroup}/clusters/${cluster.name}/namespaces`, {
-          headers: { Authorization: `Bearer ${token}` }
+    fetch('http://localhost:3001/api/kube/contexts')
+        .then(async res => {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message || 'Failed to fetch contexts');
+          return data;
         })
-        .then(res => res.json())
-        .then(setNamespaces)
-        .catch(console.error);
-      }
-    }
-  }, [selectedCluster, selectedSub, clusters, token]);
+        .then(data => {
+          if (Array.isArray(data)) setContexts(data);
+          else setContexts([]);
+        })
+        .catch(err => {
+          console.error(err);
+          setErrorMsg(err.message);
+        });
+  }, []);
 
   useEffect(() => {
-    onSelectionChange({ selectedSub, selectedCluster, selectedNamespace });
-  }, [selectedSub, selectedCluster, selectedNamespace, onSelectionChange]);
+    if (selectedContext) {
+      fetch(`http://localhost:3001/api/kube/contexts/${selectedContext}/namespaces`)
+        .then(async res => {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message || 'Failed to fetch namespaces');
+          return data;
+        })
+        .then(data => {
+          if (Array.isArray(data)) {
+            setNamespaces(data);
+            setErrorMsg('');
+          } else {
+            setNamespaces([]);
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          setNamespaces([]);
+          setErrorMsg(err.message);
+        });
+    }
+  }, [selectedContext]);
 
-  if (!session) return null;
+  useEffect(() => {
+    onSelectionChange({ selectedContext, selectedNamespace });
+  }, [selectedContext, selectedNamespace, onSelectionChange]);
 
-  const handleSubChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedSub(e.target.value);
-    setClusters([]);
-    setSelectedCluster('');
+  const handleContextChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedContext(e.target.value);
     setNamespaces([]);
     setSelectedNamespace('');
-  };
-
-  const handleClusterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedCluster(e.target.value);
-    setNamespaces([]);
-    setSelectedNamespace('');
+    setErrorMsg('');
   };
 
   return (
     <div style={{ display: 'flex', gap: '16px', padding: '16px', backgroundColor: 'var(--panel-bg)', borderBottom: '1px solid var(--border-color)' }}>
       <select 
-        value={selectedSub} 
-        onChange={handleSubChange}
+        value={selectedContext} 
+        onChange={handleContextChange}
         style={{ padding: '8px', borderRadius: '4px', background: 'var(--bg-color)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
       >
-        <option value="">Select Subscription</option>
-        {subscriptions.map((sub) => (
-          <option key={sub.id} value={sub.id}>{sub.name}</option>
-        ))}
-      </select>
-
-      <select 
-        value={selectedCluster} 
-        onChange={handleClusterChange}
-        disabled={!selectedSub}
-        style={{ padding: '8px', borderRadius: '4px', background: 'var(--bg-color)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
-      >
-        <option value="">Select AKS Cluster</option>
-        {clusters.map((c) => (
-          <option key={c.id} value={c.id}>{c.name}</option>
+        <option value="">Select Kubeconfig Context</option>
+        {contexts.length > 0 && contexts.map((ctx) => (
+          <option key={ctx.name} value={ctx.name}>{ctx.name}</option>
         ))}
       </select>
 
       <select 
         value={selectedNamespace} 
         onChange={(e) => setSelectedNamespace(e.target.value)}
-        disabled={!selectedCluster}
+        disabled={!selectedContext}
         style={{ padding: '8px', borderRadius: '4px', background: 'var(--bg-color)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
       >
         <option value="">Select Namespace</option>
@@ -130,6 +101,12 @@ export default function ClusterSelector({ onSelectionChange }: { onSelectionChan
           <option key={ns.name} value={ns.name}>{ns.name}</option>
         ))}
       </select>
+      
+      {errorMsg && (
+        <div style={{ color: '#ff4d4f', padding: '8px', fontSize: '14px', flex: 1, display: 'flex', alignItems: 'center' }}>
+          Error: {errorMsg}
+        </div>
+      )}
     </div>
   );
 }

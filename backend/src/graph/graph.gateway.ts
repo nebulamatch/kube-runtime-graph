@@ -23,16 +23,8 @@ export class GraphGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   handleConnection(client: Socket) {
     console.log(`Client connected: ${client.id}`);
-    // Send initial graph data
-    client.emit('graphUpdate', this.graphService.getGraphData());
-
-    // Start emitting simulated traffic updates if not already doing so
-    if (!this.interval) {
-      this.interval = setInterval(() => {
-        const data = this.graphService.simulateTraffic();
-        this.server.emit('graphUpdate', data);
-      }, 2000); // Update every 2 seconds
-    }
+    // Initial connection doesn't have namespace context yet.
+    // The client will emit 'requestUpdate' with context/namespace.
   }
 
   handleDisconnect(client: Socket) {
@@ -44,7 +36,9 @@ export class GraphGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('requestUpdate')
-  handleRequestUpdate(client: Socket) {
-    client.emit('graphUpdate', this.graphService.getGraphData());
+  async handleRequestUpdate(client: Socket, payload: { context: string; namespace: string }) {
+    if (!payload?.context || !payload?.namespace) return;
+    const data = await this.graphService.getGraphData(payload.context, payload.namespace);
+    client.emit('graphUpdate', data);
   }
 }

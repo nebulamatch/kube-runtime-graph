@@ -3,8 +3,6 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import styles from './layout.module.css';
 import { Activity, LayoutDashboard, Settings } from 'lucide-react';
-import { Providers } from '../components/Providers';
-import AuthButton from '../components/AuthButton';
 import Link from 'next/link';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -22,7 +20,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <Providers>
           <div className={styles.container}>
             <aside className={styles.sidebar}>
             <div className={styles.brand}>
@@ -46,10 +43,10 @@ export default function RootLayout({
             <header className={styles.header}>
               <div>
                 {/* Cluster context or namespace selector could go here */}
-                <h2 style={{ fontSize: '1rem', fontWeight: 500 }}>Cluster: local-cluster</h2>
+                <h2 style={{ fontSize: '1rem', fontWeight: 500 }}>Kube Runtime Graph</h2>
               </div>
               <div>
-                <AuthButton />
+                
               </div>
             </header>
             
@@ -58,7 +55,6 @@ export default function RootLayout({
             </div>
           </main>
         </div>
-        </Providers>
       </body>
     </html>
   );
