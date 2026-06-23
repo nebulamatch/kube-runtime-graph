@@ -15,9 +15,11 @@ spec:
       labels:
         app: kube-runtime-graph-frontend
     spec:
+      imagePullSecrets:
+      - name: ghcr-login
       containers:
       - name: frontend
-        image: ghcr.io/biswa/kube-runtime-graph-frontend:latest
+        image: ghcr.io/nebulamatch/kube-runtime-graph-frontend:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 3000

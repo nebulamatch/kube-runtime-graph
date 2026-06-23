@@ -44,7 +44,7 @@ export class KubeService {
       kc.loadFromDefault();
       kc.setCurrentContext(contextName);
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
-      const res: any = await k8sApi.listNamespacedPod({ namespace });
+      const res: any = await k8sApi.listNamespacedPod(namespace);
       const items = res.body ? res.body.items : res.items;
       return items.map((pod: any) => ({
         name: pod.metadata?.name,

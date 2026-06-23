@@ -24,7 +24,7 @@
     "@azure/arm-resources": "^7.0.0",
     "@azure/arm-subscriptions": "^6.0.0",
     "@azure/identity": "^4.13.1",
-    "@kubernetes/client-node": "^1.4.0",
+    "@kubernetes/client-node": "^0.20.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",

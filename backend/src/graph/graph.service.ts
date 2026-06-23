@@ -39,11 +39,11 @@ export class GraphService {
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
 
       // Fetch Services
-      const servicesRes: any = await k8sApi.listNamespacedService({ namespace });
+      const servicesRes: any = await k8sApi.listNamespacedService(namespace);
       const servicesItems = servicesRes.body ? servicesRes.body.items : servicesRes.items;
       
       // Fetch Pods
-      const podsRes: any = await k8sApi.listNamespacedPod({ namespace });
+      const podsRes: any = await k8sApi.listNamespacedPod(namespace);
       const podsItems = podsRes.body ? podsRes.body.items : podsRes.items;
 
       const nodes: Node[] = [];

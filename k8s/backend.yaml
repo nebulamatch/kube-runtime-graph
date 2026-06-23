@@ -35,9 +35,11 @@ spec:
         app: kube-runtime-graph-backend
     spec:
       serviceAccountName: kube-runtime-graph-backend
+      imagePullSecrets:
+      - name: ghcr-login
       containers:
       - name: backend
-        image: ghcr.io/biswa/kube-runtime-graph-backend:latest
+        image: ghcr.io/nebulamatch/kube-runtime-graph-backend:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 3001

@@ -43,11 +43,13 @@ spec:
         app: kube-runtime-graph-agent
     spec:
       serviceAccountName: kube-runtime-graph-agent
+      imagePullSecrets:
+      - name: ghcr-login
       hostNetwork: true
       hostPID: true
       containers:
       - name: agent
-        image: ghcr.io/biswa/kube-runtime-graph-agent:latest
+        image: ghcr.io/nebulamatch/kube-runtime-graph-agent:latest
         imagePullPolicy: Always
         securityContext:
           privileged: true
