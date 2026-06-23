@@ -11,6 +11,7 @@ import ReactFlow, {
   Connection,
   Edge,
   Node,
+  Position,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import styles from './page.module.css';
@@ -42,8 +43,8 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => 
 
   nodes.forEach((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
-    node.targetPosition = isHorizontal ? 'left' : 'top';
-    node.sourcePosition = isHorizontal ? 'right' : 'bottom';
+    node.targetPosition = isHorizontal ? Position.Left : Position.Top;
+    node.sourcePosition = isHorizontal ? Position.Right : Position.Bottom;
     
     // Shift position to center
     node.position = {
