@@ -5,5 +5,6 @@ import { KubeController } from './kube.controller';
 @Module({
   controllers: [KubeController],
   providers: [KubeService],
+  exports: [KubeService],
 })
 export class KubeModule {}

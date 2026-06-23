@@ -7,6 +7,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { GraphService } from './graph.service';
+import { KubeService } from '../kube/kube.service';
 
 @WebSocketGateway({
   cors: {
@@ -18,8 +19,12 @@ export class GraphGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server: Server;
 
   private interval: NodeJS.Timeout | null = null;
+  private logStreams: Map<string, any> = new Map();
 
-  constructor(private readonly graphService: GraphService) {}
+  constructor(
+    private readonly graphService: GraphService,
+    private readonly kubeService: KubeService,
+  ) {}
 
   handleConnection(client: Socket) {
     console.log(`Client connected: ${client.id}`);
@@ -33,6 +38,12 @@ export class GraphGateway implements OnGatewayConnection, OnGatewayDisconnect {
       clearInterval(this.interval);
       this.interval = null;
     }
+    // Clean up log streams
+    if (this.logStreams.has(client.id)) {
+      const req = this.logStreams.get(client.id);
+      if (req && req.abort) req.abort();
+      this.logStreams.delete(client.id);
+    }
   }
 
   @SubscribeMessage('requestUpdate')
@@ -40,5 +51,42 @@ export class GraphGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!payload?.context || !payload?.namespace) return;
     const data = await this.graphService.getGraphData(payload.context, payload.namespace);
     client.emit('graphUpdate', data);
+  }
+
+  @SubscribeMessage('subscribeLogs')
+  async handleSubscribeLogs(client: Socket, payload: { context: string; namespace: string; podName: string }) {
+    if (!payload?.context || !payload?.namespace || !payload?.podName) return;
+    
+    // Clean up existing stream for this client
+    if (this.logStreams.has(client.id)) {
+      const req = this.logStreams.get(client.id);
+      if (req && req.abort) req.abort();
+      this.logStreams.delete(client.id);
+    }
+
+    console.log(`Client ${client.id} subscribing to logs for pod: ${payload.podName}`);
+    
+    const req = await this.kubeService.streamPodLogs(
+      payload.context,
+      payload.namespace,
+      payload.podName,
+      (logLine) => {
+        client.emit('logUpdate', logLine);
+      }
+    );
+    
+    if (req) {
+      this.logStreams.set(client.id, req);
+    }
+  }
+
+  @SubscribeMessage('unsubscribeLogs')
+  handleUnsubscribeLogs(client: Socket) {
+    if (this.logStreams.has(client.id)) {
+      const req = this.logStreams.get(client.id);
+      if (req && req.abort) req.abort();
+      this.logStreams.delete(client.id);
+      console.log(`Client ${client.id} unsubscribed from logs`);
+    }
   }
 }

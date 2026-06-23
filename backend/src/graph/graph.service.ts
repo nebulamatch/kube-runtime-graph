@@ -26,6 +26,9 @@ export interface Edge {
 @Injectable()
 export class GraphService {
   private podCache: Map<string, string> = new Map(); // IP -> podId
+  private ipToServiceCache: Map<string, string> = new Map(); // IP -> svcId
+  private ipToDbCache: Map<string, string> = new Map(); // IP -> dbNodeId
+  private discoveredDbs: Map<string, Node> = new Map(); // dbNodeId -> Node
 
   async getGraphData(contextName: string, namespace: string) {
     if (!contextName || !namespace) {
@@ -109,6 +112,12 @@ export class GraphService {
               });
             }
             
+            if (pod.status?.podIP) {
+              this.ipToServiceCache.set(pod.status.podIP, svcId);
+              // Also store in podCache in case we want pod-level fallback
+              this.podCache.set(pod.status.podIP, podId);
+            }
+            
             // Connect Pod to Service
             edges.push({
               id: `e-${podId}-${svcId}`,
@@ -152,6 +161,13 @@ export class GraphService {
         }
       });
 
+      // Clear old DB cache and mapping for this namespace (in real app, we'd scope by ns)
+      
+      // Inject dynamically discovered DBs
+      Array.from(this.discoveredDbs.values()).forEach(dbNode => {
+        nodes.push(dbNode);
+      });
+
       return { nodes, edges };
     } catch (error) {
       console.error('Error fetching graph data from K8s', error);
@@ -160,17 +176,50 @@ export class GraphService {
   }
 
   async processTelemetry(payload: { sourceIp: string; destIp: string; destPort: number }) {
-    const sourceNodeId = this.podCache.get(payload.sourceIp);
-    const destNodeId = this.podCache.get(payload.destIp);
+    let sourceNodeId = this.ipToServiceCache.get(payload.sourceIp) || this.podCache.get(payload.sourceIp);
+    let destNodeId = this.ipToServiceCache.get(payload.destIp) || this.podCache.get(payload.destIp);
+
+    const newNodes: Node[] = [];
+
+    // DB Heuristic
+    if (!destNodeId) {
+      if (payload.destPort === 5432) destNodeId = `db-postgres-${payload.destIp}`;
+      else if (payload.destPort === 3306) destNodeId = `db-mysql-${payload.destIp}`;
+      else if (payload.destPort === 27017) destNodeId = `db-mongo-${payload.destIp}`;
+      else if (payload.destPort === 6379) destNodeId = `db-redis-${payload.destIp}`;
+      
+      if (destNodeId) {
+        this.ipToDbCache.set(payload.destIp, destNodeId);
+        if (!this.discoveredDbs.has(destNodeId)) {
+          const dbNode: Node = {
+            id: destNodeId,
+            type: 'custom',
+            position: { x: Math.random() * 800, y: Math.random() * 400 },
+            data: {
+              label: destNodeId.split('-')[1].toUpperCase() + ' DB',
+              type: 'db',
+              rps: 0,
+              latency: '0ms',
+              errorRate: 0,
+            }
+          };
+          this.discoveredDbs.set(destNodeId, dbNode);
+          newNodes.push(dbNode);
+        }
+      }
+    }
 
     if (sourceNodeId && destNodeId) {
       return {
-        id: `t-${sourceNodeId}-${destNodeId}-${payload.destPort}-${Date.now()}`,
-        source: sourceNodeId,
-        target: destNodeId,
-        animated: true,
-        style: { stroke: '#10b981', strokeWidth: 3 },
-        data: { port: payload.destPort }
+        edge: {
+          id: `t-${sourceNodeId}-${destNodeId}-${payload.destPort}`,
+          source: sourceNodeId,
+          target: destNodeId,
+          animated: true,
+          style: { stroke: '#10b981', strokeWidth: 3 },
+          data: { port: payload.destPort }
+        },
+        newNodes: newNodes.length > 0 ? newNodes : undefined
       };
     }
     return null;

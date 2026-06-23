@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return */
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import * as k8s from '@kubernetes/client-node';
+import * as stream from 'stream';
 
 @Injectable()
 export class KubeService {
@@ -57,6 +58,26 @@ export class KubeService {
         `Failed to list pods: ${error?.message || JSON.stringify(error)}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+
+  async streamPodLogs(contextName: string, namespace: string, podName: string, callback: (logLine: string) => void) {
+    try {
+      const kc = new k8s.KubeConfig();
+      kc.loadFromDefault();
+      kc.setCurrentContext(contextName);
+      const log = new k8s.Log(kc);
+      const logStream = new stream.PassThrough();
+      logStream.on('data', (chunk) => {
+        callback(chunk.toString());
+      });
+      // follow: true holds the connection open to tail logs
+      const req = await log.log(namespace, podName, '', logStream, { follow: true, tailLines: 100, pretty: false, timestamps: false });
+      return req;
+    } catch (error) {
+      console.error(`Failed to stream logs for ${podName}`, error);
+      callback(`[System] Failed to stream logs: ${error}`);
+      return null;
     }
   }
 }

@@ -33,6 +33,9 @@ export default function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selection, setSelection] = useState<SelectionState>({});
+  const [socket, setSocket] = useState<any>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const logsEndRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Only connect if a namespace and context are selected
@@ -59,7 +62,17 @@ export default function App() {
       setEdges(data.edges);
     });
 
-    socket.on('telemetryUpdate', (newEdge: Edge) => {
+    socket.on('telemetryUpdate', (payload: any) => {
+      // payload might be an edge, or an object { edge: Edge, newNodes?: Node[] }
+      const newEdge = payload.edge || payload;
+      
+      if (payload.newNodes && Array.isArray(payload.newNodes) && payload.newNodes.length > 0) {
+        setNodes((currentNodes) => {
+          const toAdd = payload.newNodes.filter((nn: Node) => !currentNodes.some(n => n.id === nn.id));
+          return [...currentNodes, ...toAdd];
+        });
+      }
+
       setEdges((currentEdges) => {
         // Find if this edge exists
         const existingEdgeIndex = currentEdges.findIndex(e => e.id === newEdge.id || (e.source === newEdge.source && e.target === newEdge.target));
@@ -84,6 +97,15 @@ export default function App() {
         return updatedEdges;
       });
     });
+
+    socket.on('logUpdate', (logLine: string) => {
+      setLogs(prev => {
+        const newLogs = [...prev, logLine];
+        return newLogs.length > 500 ? newLogs.slice(newLogs.length - 500) : newLogs;
+      });
+    });
+
+    setSocket(socket);
 
     return () => {
       socket.disconnect();
@@ -118,13 +140,30 @@ export default function App() {
 
   const onConnect = useCallback((params: Edge | Connection) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
 
+  useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs]);
+
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
     setSelectedNodeId(node.id);
-  }, []);
+    setLogs([]); // clear old logs
+    if (socket && node.data?.type === 'pod' && selection.selectedContext && selection.selectedNamespace) {
+      socket.emit('subscribeLogs', {
+        context: selection.selectedContext,
+        namespace: selection.selectedNamespace,
+        podName: node.data.label
+      });
+    }
+  }, [socket, selection]);
 
   const onPaneClick = useCallback(() => {
     setSelectedNodeId(null);
-  }, []);
+    if (socket) {
+      socket.emit('unsubscribeLogs');
+    }
+  }, [socket]);
 
   return (
     <div className={styles.pageWrapper} style={{ flexDirection: 'column' }}>
@@ -196,6 +235,26 @@ export default function App() {
               <p>ID: {selectedNode.id}</p>
             </div>
             </div>
+
+            {selectedNode.data?.type === 'pod' && (
+              <div style={{ marginTop: '20px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <h3 style={{fontSize: '0.9rem', marginBottom: '8px'}}>Live Logs</h3>
+                <div style={{ 
+                  flex: 1, 
+                  backgroundColor: '#1f2937', 
+                  color: '#10b981', 
+                  fontFamily: 'monospace', 
+                  fontSize: '12px',
+                  padding: '10px',
+                  borderRadius: '6px',
+                  overflowY: 'auto',
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  {logs.length === 0 ? 'Waiting for logs...' : logs.map((log, i) => <div key={i}>{log}</div>)}
+                  <div ref={logsEndRef} />
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
