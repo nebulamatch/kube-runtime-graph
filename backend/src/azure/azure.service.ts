@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unused-vars, @typescript-eslint/require-await */
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { SubscriptionClient } from '@azure/arm-resources-subscriptions';
 import { ContainerServiceClient } from '@azure/arm-containerservice';
 import { TokenCredential, AccessToken } from '@azure/core-auth';
+import { SubscriptionClient } from '@azure/arm-subscriptions';
 
 class SimpleTokenCredential implements TokenCredential {
-  constructor(private token: string) {}
+  constructor(private token: string) { }
   async getToken(): Promise<AccessToken> {
     return { token: this.token, expiresOnTimestamp: Date.now() + 3600000 };
   }
@@ -22,13 +22,8 @@ export class AzureService {
 
     try {
       const client = new SubscriptionClient(this.createCredential(token));
-      const subscriptions = [];
-      for await (const sub of client.subscriptions.list()) {
-        subscriptions.push({
-          id: sub.subscriptionId as string,
-          name: sub.displayName as string,
-        });
-      }
+      let subscriptions = [];
+      subscriptions.push(client.subscription);
       return subscriptions;
     } catch (error: unknown) {
       const err = error as Error;
