@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-runtime-agent
+  namespace: kube-system
+  labels:
+    app: kube-runtime-agent
+spec:
+  selector:
+    matchLabels:
+      app: kube-runtime-agent
+  template:
+    metadata:
+      labels:
+        app: kube-runtime-agent
+    spec:
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - name: agent
+        image: ghcr.io/YOUR_GITHUB_ORG/kube-runtime-graph-agent:latest
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: sys-kernel-debug
+          mountPath: /sys/kernel/debug
+      volumes:
+      - name: sys-kernel-debug
+        hostPath:
+          path: /sys/kernel/debug
