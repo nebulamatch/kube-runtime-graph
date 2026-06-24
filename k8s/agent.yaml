@@ -63,7 +63,7 @@ spec:
               - BPF
         env:
         - name: BACKEND_URL
-          value: "http://127.0.0.1:32001/api/telemetry"
+          value: "http://kube-runtime-graph-backend.kube-system.svc.cluster.local:3001/api/telemetry"
         volumeMounts:
         - name: sys-kernel-debug
           mountPath: /sys/kernel/debug

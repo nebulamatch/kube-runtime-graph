@@ -85,6 +85,13 @@ export class GraphGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.emit('graphUpdate', data);
   }
 
+  // Broadcast a fresh graph to all clients after telemetry changes topology.
+  async broadcastFreshGraph(context: string, namespace: string) {
+    if (!context || !namespace) return;
+    const data = await this.graphService.getGraphData(context, namespace);
+    this.server.emit('graphUpdate', data);
+  }
+
   @SubscribeMessage('subscribeLogs')
   async handleSubscribeLogs(client: Socket, payload: { context: string; namespace: string; podName: string }) {
     if (!payload?.context || !payload?.namespace || !payload?.podName) return;

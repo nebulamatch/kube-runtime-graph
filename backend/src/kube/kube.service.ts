@@ -18,8 +18,6 @@ export class KubeService {
   private loadConfig(contextName?: string): k8s.KubeConfig {
     const kc = new k8s.KubeConfig();
     if (process.env.KUBERNETES_SERVICE_HOST) {
-      process.env.KUBERNETES_SERVICE_HOST = 'kubernetes.default.svc.cluster.local';
-      process.env.KUBERNETES_SERVICE_PORT = '443';
       kc.loadFromCluster();
     } else {
       kc.loadFromDefault();
@@ -38,8 +36,6 @@ export class KubeService {
     try {
       const kc = new k8s.KubeConfig();
       if (process.env.KUBERNETES_SERVICE_HOST) {
-        process.env.KUBERNETES_SERVICE_HOST = 'kubernetes.default.svc.cluster.local';
-        process.env.KUBERNETES_SERVICE_PORT = '443';
         kc.loadFromCluster();
       } else {
         kc.loadFromDefault();
