@@ -1,63 +1,84 @@
-:root {
-  --bg-color: #0b0f19;
-  --panel-bg: #111827;
-  --border-color: #1f2937;
-  --text-primary: #f3f4f6;
-  --text-secondary: #9ca3af;
-  --accent-color: #3b82f6;
-  --success-color: #10b981;
-  --warning-color: #f59e0b;
-  --danger-color: #ef4444;
-  --font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+@import "tailwindcss";
+@import "reactflow/dist/style.css";
+@source "../";
+
+@theme {
+  --color-surface: #10131a;
+  --color-surface-dim: #10131a;
+  --color-surface-bright: #363941;
+  --color-surface-container-lowest: #0b0e15;
+  --color-surface-container-low: #191b23;
+  --color-surface-container: #1d2027;
+  --color-surface-container-high: #272a31;
+  --color-surface-container-highest: #32353c;
+
+  --color-on-surface: #e1e2ec;
+  --color-on-surface-variant: #c2c6d6;
+  --color-outline: #8c909f;
+  --color-outline-variant: #424754;
+
+  --color-primary: #adc6ff;
+  --color-on-primary: #002e6a;
+  --color-primary-container: #4d8eff;
+  --color-on-primary-container: #00285d;
+  --color-primary-fixed: #d8e2ff;
+
+  --color-secondary: #ddb7ff;
+  --color-on-secondary: #490080;
+  --color-secondary-container: #6f00be;
+  --color-on-secondary-container: #d6a9ff;
+
+  --color-error: #ffb4ab;
+  --color-on-error: #690005;
+  --color-error-container: #93000a;
+  --color-on-error-container: #ffdad6;
+
+  --color-tertiary: #ffb786;
+  --color-tertiary-container: #df7412;
+
+  --color-accent-green: #10b981;
+
+  --font-display: var(--font-outfit), sans-serif;
+  --font-body: var(--font-inter), sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+@layer utilities {
+  .glass-panel {
+    @apply bg-surface-container-low/80 backdrop-blur-[20px] shadow-[0_4px_30px_rgba(0,0,0,0.5)];
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .glow-green {
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.22);
+  }
+
+  .glow-purple {
+    box-shadow: 0 0 15px rgba(111, 0, 190, 0.22);
+  }
+
+  .glow-red {
+    box-shadow: 0 0 15px rgba(255, 180, 171, 0.22);
+  }
 }
 
-body {
-  background-color: var(--bg-color);
-  color: var(--text-primary);
-  font-family: var(--font-family);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+@layer base {
+  .terminal-scroll::-webkit-scrollbar {
+    width: 8px;
+  }
+  .terminal-scroll::-webkit-scrollbar-track {
+    @apply bg-surface-container-lowest;
+  }
+  .terminal-scroll::-webkit-scrollbar-thumb {
+    @apply bg-outline-variant rounded-full;
+  }
+  .terminal-scroll::-webkit-scrollbar-thumb:hover {
+    @apply bg-outline;
+  }
 
-/* React Flow Custom Overrides for Dark Mode */
-.react-flow__node {
-  border-radius: 8px;
-}
-
-.react-flow__panel {
-  background-color: var(--panel-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  color: var(--text-primary);
-}
-
-.react-flow__controls button {
-  background-color: var(--panel-bg);
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-primary);
-}
-.react-flow__controls button:hover {
-  background-color: #1f2937;
-}
-
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: var(--bg-color);
-}
-::-webkit-scrollbar-thumb {
-  background: #374151;
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
+  .react-flow__background {
+    @apply bg-surface-container-lowest;
+  }
 }

@@ -89,4 +89,78 @@ export class KubeService {
       return null;
     }
   }
+
+  async getEvents(contextName: string, namespace: string) {
+    try {
+      const kc = new k8s.KubeConfig();
+      kc.loadFromDefault();
+      if (contextName && contextName !== 'in-cluster') {
+        kc.setCurrentContext(contextName);
+      }
+      const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
+      const res: any = await k8sApi.listNamespacedEvent(namespace);
+      const items = res.body ? res.body.items : res.items;
+      return items.map((evt: any) => ({
+        name: evt.metadata?.name,
+        namespace: evt.metadata?.namespace,
+        reason: evt.reason,
+        message: evt.message,
+        type: evt.type,
+        firstTimestamp: evt.firstTimestamp || evt.metadata?.creationTimestamp,
+        lastTimestamp: evt.lastTimestamp || evt.metadata?.creationTimestamp,
+        count: evt.count,
+        source: evt.source?.component || 'unknown',
+      }));
+    } catch (error: any) {
+      console.error('Failed to list events', error);
+      throw new HttpException(
+        `Failed to list events: ${error?.message || JSON.stringify(error)}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async getRbac(contextName: string, namespace: string) {
+    try {
+      const kc = new k8s.KubeConfig();
+      kc.loadFromDefault();
+      if (contextName && contextName !== 'in-cluster') {
+        kc.setCurrentContext(contextName);
+      }
+      const rbacApi = kc.makeApiClient(k8s.RbacAuthorizationV1Api);
+      
+      const rolesRes: any = await rbacApi.listNamespacedRole(namespace);
+      const rolesItems = rolesRes.body ? rolesRes.body.items : rolesRes.items;
+      
+      const roleBindingsRes: any = await rbacApi.listNamespacedRoleBinding(namespace);
+      const bindingsItems = roleBindingsRes.body ? roleBindingsRes.body.items : roleBindingsRes.items;
+      
+      const clusterRolesRes: any = await rbacApi.listClusterRole();
+      const clusterRolesItems = clusterRolesRes.body ? clusterRolesRes.body.items : clusterRolesRes.items;
+      
+      return {
+        roles: rolesItems.map((r: any) => ({
+          name: r.metadata?.name,
+          namespace: r.metadata?.namespace,
+          rulesCount: r.rules?.length || 0,
+        })),
+        roleBindings: bindingsItems.map((b: any) => ({
+          name: b.metadata?.name,
+          namespace: b.metadata?.namespace,
+          roleRef: b.roleRef?.name,
+          subjectsCount: b.subjects?.length || 0,
+        })),
+        clusterRoles: clusterRolesItems.slice(0, 20).map((cr: any) => ({
+          name: cr.metadata?.name,
+          rulesCount: cr.rules?.length || 0,
+        })),
+      };
+    } catch (error: any) {
+      console.error('Failed to list RBAC resources', error);
+      throw new HttpException(
+        `Failed to list RBAC: ${error?.message || JSON.stringify(error)}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }

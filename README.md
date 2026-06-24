@@ -1,6 +1,6 @@
 # Kube Runtime Graph
 
-Kube Runtime Graph is a real-time telemetry and visualization tool for Kubernetes clusters. It leverages deep kernel observability (eBPF) to map out exactly how your microservices are interacting at runtime—both at the TCP transport layer and the HTTP application layer—without requiring any sidecar proxies or code instrumentation.
+Kube Runtime Graph is a real-time telemetry and visualization tool for Kubernetes clusters. It leverages deep kernel observability (eBPF) to map out exactly how your services are interacting at runtime—both at the TCP transport layer and the HTTP application layer—without requiring any sidecar proxies or code instrumentation.
 
 ## Architecture
 

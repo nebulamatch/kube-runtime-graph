@@ -1,11 +1,25 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, Outfit, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
-import styles from './layout.module.css';
-import { Activity, LayoutDashboard, Settings } from 'lucide-react';
-import Link from 'next/link';
+import { KubeGlobalProvider } from '../context/KubeContext';
 
-const inter = Inter({ subsets: ['latin'] });
+const inter = Inter({ 
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+});
+
+const outfit = Outfit({
+  subsets: ['latin'],
+  variable: '--font-outfit',
+  display: 'swap',
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-jetbrains-mono',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'Kube Runtime Graph',
@@ -18,44 +32,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-          <div className={styles.container}>
-            <aside className={styles.sidebar}>
-            <div className={styles.brand}>
-              <Activity color="#3b82f6" size={28} />
-              <h1>KubeGraph</h1>
-            </div>
-            
-            <nav className={styles.nav}>
-              <Link href="/" className={`${styles.navItem} ${styles.active}`}>
-                <LayoutDashboard size={20} />
-                Runtime Graph
-              </Link>
-              <Link href="/settings" className={styles.navItem}>
-                <Settings size={20} />
-                Settings
-              </Link>
-            </nav>
-          </aside>
-          
-          <main className={styles.main}>
-            <header className={styles.header}>
-              <div>
-                {/* Cluster context or namespace selector could go here */}
-                <h2 style={{ fontSize: '1rem', fontWeight: 500 }}>Kube Runtime Graph</h2>
-              </div>
-              <div>
-                
-              </div>
-            </header>
-            
-            <div className={styles.content}>
-              {children}
-            </div>
-          </main>
-        </div>
+    <html lang="en" className={`${inter.variable} ${outfit.variable} ${jetbrainsMono.variable}`}>
+      <body className="bg-surface-container-lowest text-on-surface font-body antialiased selection:bg-primary-container selection:text-on-primary">
+        <KubeGlobalProvider>
+          {children}
+        </KubeGlobalProvider>
       </body>
     </html>
   );
 }
+

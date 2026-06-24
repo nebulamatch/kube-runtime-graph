@@ -23,4 +23,20 @@ export class KubeController {
   ) {
     return this.kubeService.getPods(context, namespace);
   }
+
+  @Get('contexts/:context/namespaces/:namespace/events')
+  async getEvents(
+    @Param('context') context: string,
+    @Param('namespace') namespace: string,
+  ) {
+    return this.kubeService.getEvents(context, namespace);
+  }
+
+  @Get('contexts/:context/namespaces/:namespace/rbac')
+  async getRbac(
+    @Param('context') context: string,
+    @Param('namespace') namespace: string,
+  ) {
+    return this.kubeService.getRbac(context, namespace);
+  }
 }
