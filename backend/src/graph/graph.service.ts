@@ -37,6 +37,10 @@ export class GraphService {
   private discoveredDbs: Map<string, Node> = new Map(); // dbNodeId -> Node
   private activeEdges: Map<string, Edge> = new Map(); // EdgeId -> Edge
 
+  private invalidateGraphCache() {
+    this.graphCache.clear();
+  }
+
   async getGraphData(contextName: string, namespace: string) {
     if (!contextName || !namespace) {
       return { nodes: [], edges: [] };
@@ -292,6 +296,7 @@ export class GraphService {
       };
       
       this.activeEdges.set(edge.id, edge);
+      this.invalidateGraphCache();
 
       return {
         edge,

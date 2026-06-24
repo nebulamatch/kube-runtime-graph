@@ -64,6 +64,7 @@ export default function Home() {
   const [logs, setLogs] = useState<string[]>([]);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const refreshDebounceRef = useRef<any>(null);
 
   useEffect(() => {
     // Artificial delay to show the awesome splash screen
@@ -156,7 +157,12 @@ export default function Home() {
       // When traffic changes, request a fresh graph snapshot so the layout can
       // move service/pod/db nodes based on current relationships.
       if (selectedContext && selectedNamespace) {
-        newSocket.emit('requestUpdate', { context: selectedContext, namespace: selectedNamespace });
+        if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
+        refreshDebounceRef.current = setTimeout(() => {
+          setNodes([]);
+          setEdges([]);
+          newSocket.emit('requestUpdate', { context: selectedContext, namespace: selectedNamespace });
+        }, 150);
       }
     };
 
