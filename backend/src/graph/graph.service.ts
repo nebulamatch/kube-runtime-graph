@@ -140,55 +140,63 @@ export class GraphService {
     }
   }
 
-  // Calculate hierarchy level for each service (0 = root/API services, higher = children)
-  private calculateServiceHierarchy(services: string[]): Map<string, number> {
+  // Classify service type by name patterns
+  private classifyServiceType(serviceName: string): 'gateway' | 'microservice' | 'database' | 'other' {
+    const lower = serviceName.toLowerCase();
+    // Gateway/API patterns
+    if (/gateway|api|ingress|loadbalancer|frontend|ui|web/.test(lower)) return 'gateway';
+    // Database patterns
+    if (/db|database|postgres|mysql|mongo|redis|cache|supabase|dynamodb|elasticsearch|kafka/i.test(lower)) return 'database';
+    // Default to microservice for most service names
+    return 'microservice';
+  }
+
+  // Calculate hierarchy level for each service: 0 = API/Gateway, 1 = Microservices, 2 = Databases
+  private calculateServiceHierarchy(services: string[], servicesMetadata?: Map<string, any>): Map<string, number> {
     const hierarchy = new Map<string, number>();
-    const visited = new Set<string>();
     
-    // Find root services (those that call others but aren't called by anyone)
+    // First pass: classify by type
+    const typeMap = new Map<string, 'gateway' | 'microservice' | 'database' | 'other'>();
+    services.forEach(svcId => {
+      const svcName = svcId.replace('svc-', '');
+      typeMap.set(svcId, this.classifyServiceType(svcName));
+    });
+
+    // Second pass: assign hierarchy levels based on type and call graph
     const callers = new Set(this.serviceCallGraph.keys());
     const callees = new Set<string>();
     for (const targets of this.serviceCallGraph.values()) {
       targets.forEach(t => callees.add(t));
     }
+
+    // Assign levels:
+    // Level 0: Gateways and entry points (callers but not callees, or explicitly gateway type)
+    // Level 1: Microservices (those between gateways and databases)
+    // Level 2: Databases (those not calling anything or are database type)
     
-    let rootServices = Array.from(callers).filter(svc => !callees.has(svc));
-    if (rootServices.length === 0) {
-      // If no clear root, pick the one that calls the most
-      let maxCalls = 0;
-      rootServices = [Array.from(callers).sort((a, b) => 
-        (this.serviceCallGraph.get(b)?.size || 0) - (this.serviceCallGraph.get(a)?.size || 0)
-      )[0]].filter(Boolean);
-    }
-    
-    // BFS to assign levels
-    const queue: [string, number][] = rootServices.map(s => [s, 0]);
-    services.forEach(s => {
-      if (!callers.has(s) && !callees.has(s)) {
-        queue.push([s, 0]); // Isolated services are roots too
-      }
-    });
-
-    while (queue.length > 0) {
-      const [serviceId, level] = queue.shift()!;
-      if (visited.has(serviceId)) continue;
-      visited.add(serviceId);
-      hierarchy.set(serviceId, level);
-
-      const targets = this.serviceCallGraph.get(serviceId);
-      if (targets) {
-        targets.forEach(target => {
-          if (!visited.has(target)) {
-            queue.push([target, level + 1]);
-          }
-        });
-      }
-    }
-
-    // Any service not visited is at level 0
-    services.forEach(s => {
-      if (!hierarchy.has(s)) {
-        hierarchy.set(s, 0);
+    services.forEach(svcId => {
+      const type = typeMap.get(svcId);
+      
+      if (type === 'database') {
+        hierarchy.set(svcId, 2);
+      } else if (type === 'gateway') {
+        hierarchy.set(svcId, 0);
+      } else if (type === 'microservice') {
+        // If it's a caller but not called, it's likely a gateway
+        const isCaller = callers.has(svcId);
+        const isCallee = callees.has(svcId);
+        
+        if (isCaller && !isCallee) {
+          hierarchy.set(svcId, 0); // Entry point
+        } else if (isCallee && !isCaller) {
+          hierarchy.set(svcId, 1); // Called but doesn't call others
+        } else if (isCaller && isCallee) {
+          hierarchy.set(svcId, 1); // Middle service
+        } else {
+          hierarchy.set(svcId, 1); // Isolated microservice
+        }
+      } else {
+        hierarchy.set(svcId, 1); // Default to middle
       }
     });
 
@@ -248,18 +256,20 @@ export class GraphService {
       const servicesByLevel = new Map<number, any[]>();
       servicesItems.forEach((svc: any) => {
         const svcId = `svc-${svc.metadata.name}`;
-        const level = hierarchy.get(svcId) || 0;
+        const level = hierarchy.get(svcId) || 1;
         if (!servicesByLevel.has(level)) {
           servicesByLevel.set(level, []);
         }
         servicesByLevel.get(level)!.push(svc);
       });
 
-      const levelSpacing = 300;
-      const startY = 50;
-      const startX = 100;
+      // Vertical spacing: large gaps between levels (UI → API → Services → DB)
+      const levelSpacing = 400;
+      const startY = 100;
+      const canvasWidth = 2000;
+      const centerX = canvasWidth / 2;
 
-      // Position services hierarchically: level 0 at top center, level 1 below and spread out, etc
+      // Position services hierarchically with clear visual levels
       servicesItems.forEach((svc: any) => {
         const svcId = `svc-${svc.metadata.name}`;
         const svcClusterIp = svc.spec?.clusterIP;
@@ -277,13 +287,15 @@ export class GraphService {
           this.ipToServiceCache.set(ip, svcId);
         });
 
-        // Calculate position based on hierarchy
-        const level = hierarchy.get(svcId) || 0;
+        // Calculate position based on hierarchy level
+        const level = hierarchy.get(svcId) || 1;
         const levelsServices = servicesByLevel.get(level) || [];
         const indexInLevel = levelsServices.indexOf(svc);
         const servicesInThisLevel = levelsServices.length;
-        const horizontalSpacing = 400;
-        const xOffset = startX + (indexInLevel - (servicesInThisLevel - 1) / 2) * horizontalSpacing;
+        
+        // Wider horizontal spacing for microservices level, narrower for gateways/databases
+        const horizontalSpacing = level === 1 ? 500 : 350;
+        const xOffset = centerX + (indexInLevel - (servicesInThisLevel - 1) / 2) * horizontalSpacing;
         const yOffset = startY + level * levelSpacing;
 
         nodes.push({
@@ -361,7 +373,8 @@ export class GraphService {
       });
 
       // Add any orphaned pods (not matching any service)
-      let orphanYOffset = startY + (Math.max(...Array.from(hierarchy.values())) + 2) * levelSpacing;
+      const maxLevel = Math.max(...Array.from(hierarchy.values()), 2);
+      let orphanYOffset = startY + (maxLevel + 1) * levelSpacing;
       podsItems.forEach((pod: any) => {
         const podId = `pod-${pod.metadata.name}`;
         
@@ -373,7 +386,7 @@ export class GraphService {
           nodes.push({
             id: podId,
             type: 'custom',
-            position: { x: startX, y: orphanYOffset },
+            position: { x: centerX - 200 + (orphanYOffset % 400), y: orphanYOffset },
             data: {
               label: pod.metadata.name,
               type: 'pod',
@@ -389,9 +402,27 @@ export class GraphService {
 
       // Clear old DB cache and mapping for this namespace (in real app, we'd scope by ns)
       
-      // Inject dynamically discovered DBs
+      // Inject dynamically discovered DBs and position them at database level
+      let dbIndex = 0;
+      const dbsByType = new Map<string, Node[]>();
       Array.from(this.discoveredDbs.values()).forEach(dbNode => {
-        nodes.push(dbNode);
+        // Reposition discovered databases at the database level (level 2)
+        const dbType = dbNode.data?.label?.split(' ')[0] || 'unknown';
+        if (!dbsByType.has(dbType)) {
+          dbsByType.set(dbType, []);
+        }
+        dbsByType.get(dbType)!.push(dbNode);
+      });
+
+      let currentDbIndex = 0;
+      dbsByType.forEach((dbs, type) => {
+        dbs.forEach((db, idx) => {
+          const totalDbs = Array.from(this.discoveredDbs.values()).length;
+          const xOffset = centerX + (idx - (dbs.length - 1) / 2) * 250;
+          const yOffset = startY + 2 * levelSpacing;
+          db.position = { x: xOffset, y: yOffset };
+          nodes.push(db);
+        });
       });
 
       // Inject active telemetry edges

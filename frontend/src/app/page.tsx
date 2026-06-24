@@ -76,17 +76,22 @@ export default function Home() {
 
   useEffect(() => {
     if (isLoading) return;
+    // Do not connect socket until the user has selected a context and namespace
+    if (!selectedContext || !selectedNamespace) {
+      setNodes([]);
+      setEdges([]);
+      return;
+    }
 
     const newSocket = io(socketUrl);
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
       console.log('Socket connected to backend');
-      if (selectedContext && selectedNamespace) {
-        newSocket.emit('requestUpdate', { context: selectedContext, namespace: selectedNamespace });
-      }
+      newSocket.emit('requestUpdate', { context: selectedContext, namespace: selectedNamespace });
     });
 
+    // Merge incoming full-graph updates instead of replacing the entire state
     newSocket.on('graphUpdate', (data) => {
       if (!data.nodes || data.nodes.length === 0) {
         setNodes([]);
@@ -94,32 +99,39 @@ export default function Home() {
         return;
       }
 
-      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-        data.nodes.map((n: any) => ({
-          ...n,
-          type: n.data?.type === 'service' ? 'custom' : 'pod',
-        })),
-        data.edges.map((e: any) => {
-          // Check if this is a service-to-service edge
-          const sourceNode = data.nodes.find((n: any) => n.id === e.source);
-          const targetNode = data.nodes.find((n: any) => n.id === e.target);
-          const isServiceToService = sourceNode?.data?.type === 'service' && targetNode?.data?.type === 'service';
-          
-          return {
-            ...e,
-            type: e.type || 'custom',
-            markerEnd: { type: MarkerType.ArrowClosed, color: isServiceToService ? '#f97316' : 'var(--color-primary-container)' },
-            style: isServiceToService 
-              ? { strokeWidth: 4, stroke: '#f97316', strokeDasharray: '5,5' }
-              : { strokeWidth: 2, stroke: 'var(--color-primary-container)' },
-            animated: true,
-          };
-        }),
-        'LR'
-      );
-      
-      setNodes(layoutedNodes);
-      setEdges(layoutedEdges);
+      const mappedNodes = data.nodes.map((n: any) => ({ ...n, type: n.data?.type === 'service' ? 'custom' : 'pod' }));
+      const mappedEdges = data.edges.map((e: any) => {
+        const sourceNode = data.nodes.find((n: any) => n.id === e.source);
+        const targetNode = data.nodes.find((n: any) => n.id === e.target);
+        const isServiceToService = sourceNode?.data?.type === 'service' && targetNode?.data?.type === 'service';
+        return {
+          ...e,
+          type: e.type || 'custom',
+          markerEnd: { type: MarkerType.ArrowClosed, color: isServiceToService ? '#f97316' : 'var(--color-primary-container)' },
+          style: isServiceToService ? { strokeWidth: 4, stroke: '#f97316', strokeDasharray: '5,5' } : { strokeWidth: 2, stroke: 'var(--color-primary-container)' },
+          animated: true,
+        };
+      });
+
+      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(mappedNodes, mappedEdges, 'LR');
+
+      // Merge nodes: update positions/data for existing, add new
+      setNodes((prev) => {
+        const prevMap = new Map(prev.map(n => [n.id, n]));
+        layoutedNodes.forEach(ln => {
+          if (prevMap.has(ln.id)) {
+            const existing = prevMap.get(ln.id)!;
+            prevMap.set(ln.id, { ...existing, ...ln });
+          } else {
+            prevMap.set(ln.id, ln);
+          }
+        });
+        // Keep ordering from layoutedNodes to reflect hierarchy
+        return layoutedNodes.map(n => prevMap.get(n.id)!);
+      });
+
+      // Merge edges: replace or add, follow layoutedEdges set
+      setEdges(() => layoutedEdges);
     });
 
     // Handle telemetry deltas emitted from backend. The payload is expected to
@@ -169,16 +181,10 @@ export default function Home() {
         });
       }
 
-      // When traffic changes, request a fresh graph snapshot so the layout can
-      // move service/pod/db nodes based on current relationships.
-      if (selectedContext && selectedNamespace) {
-        if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
-        refreshDebounceRef.current = setTimeout(() => {
-          setNodes([]);
-          setEdges([]);
-          newSocket.emit('requestUpdate', { context: selectedContext, namespace: selectedNamespace });
-        }, 150);
-      }
+      // Do NOT force a full graph refresh on every telemetry event. The
+      // backend will broadcast a 'graphUpdate' when topology/layout changes
+      // in a meaningful way. This prevents blinking and full re-layout on
+      // high-frequency updates.
     };
 
     newSocket.on('telemetryUpdate', (payload: any) => {
