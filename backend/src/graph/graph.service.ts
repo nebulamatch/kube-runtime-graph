@@ -33,6 +33,7 @@ export class GraphService {
   private podCache: Map<string, string> = new Map(); // IP -> podId
   private ipToServiceCache: Map<string, string> = new Map(); // IP -> svcId
   private serviceIpCache: Map<string, string> = new Map(); // cluster/external IP -> svcId
+  private ipToNamespaceCache: Map<string, string> = new Map(); // IP -> namespace
   private ipToDbCache: Map<string, string> = new Map(); // IP -> dbNodeId
   private discoveredDbs: Map<string, Node> = new Map(); // dbNodeId -> Node
   private activeEdges: Map<string, Edge> = new Map(); // EdgeId -> Edge
@@ -42,6 +43,14 @@ export class GraphService {
 
   private invalidateGraphCache() {
     this.graphCache.clear();
+  }
+
+  private getNamespaceFromNodeId(nodeId: string): string | undefined {
+    for (const entry of this.graphCache.values()) {
+      const found = entry.data.nodes.find((n) => n.id === nodeId);
+      if (found?.data?.namespace) return found.data.namespace;
+    }
+    return undefined;
   }
 
   // Fallback: resolve IPs by querying the Kubernetes API when caches miss.
@@ -236,6 +245,7 @@ export class GraphService {
       this.podCache.clear();
       this.ipToServiceCache.clear();
       this.serviceIpCache.clear();
+      this.ipToNamespaceCache.clear();
 
       // Fetch Services
       const servicesRes: any = await k8sApi.listNamespacedService(namespace);
@@ -281,10 +291,12 @@ export class GraphService {
         if (svcClusterIp && svcClusterIp !== 'None') {
           this.serviceIpCache.set(svcClusterIp, svcId);
           this.ipToServiceCache.set(svcClusterIp, svcId);
+          if (svc.metadata?.namespace) this.ipToNamespaceCache.set(svcClusterIp, svc.metadata.namespace);
         }
         [...externalIps, ...lbIngressIps].filter(Boolean).forEach((ip) => {
           this.serviceIpCache.set(ip, svcId);
           this.ipToServiceCache.set(ip, svcId);
+          if (svc.metadata?.namespace) this.ipToNamespaceCache.set(ip, svc.metadata.namespace);
         });
 
         // Calculate position based on hierarchy level
@@ -359,6 +371,7 @@ export class GraphService {
           if (pod.status?.podIP) {
             this.ipToServiceCache.set(pod.status.podIP, svcId);
             this.podCache.set(pod.status.podIP, podId);
+            if (pod.metadata?.namespace) this.ipToNamespaceCache.set(pod.status.podIP, pod.metadata.namespace);
           }
 
           // Connect Pod to Service with service reference
@@ -380,6 +393,7 @@ export class GraphService {
         
         if (pod.status?.podIP) {
           this.podCache.set(pod.status.podIP, podId);
+          if (pod.metadata?.namespace) this.ipToNamespaceCache.set(pod.status.podIP, pod.metadata.namespace);
         }
 
         if (!nodes.find(n => n.id === podId)) {
@@ -530,9 +544,22 @@ export class GraphService {
       this.activeEdges.set(edge.id, edge);
       this.invalidateGraphCache();
 
+      const destPodId = this.podCache.get(payload.destIp);
+
+      const sourceNamespace = this.ipToNamespaceCache.get(payload.sourceIp)
+        || (sourceServiceId ? this.getNamespaceFromNodeId(sourceServiceId) : undefined);
+      const destNamespace = this.ipToNamespaceCache.get(payload.destIp)
+        || (destServiceId ? this.getNamespaceFromNodeId(destServiceId) : undefined);
+
       return {
         edge,
         topologyChanged,
+        sourceServiceId,
+        destServiceId,
+        sourcePodId,
+        destPodId,
+        sourceNamespace,
+        destNamespace,
         newNodes: newNodes.length > 0 ? newNodes : undefined
       };
     }

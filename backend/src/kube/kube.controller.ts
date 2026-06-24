@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { Controller, Get, Param } from '@nestjs/common';
 import { KubeService } from './kube.service';
+import { ApiEventsStore } from '../telemetry/api-events.store';
 
 @Controller('api/kube')
 export class KubeController {
@@ -30,6 +31,14 @@ export class KubeController {
     @Param('namespace') namespace: string,
   ) {
     return this.kubeService.getEvents(context, namespace);
+  }
+
+  @Get('contexts/:context/namespaces/:namespace/api-traces')
+  async getApiTraces(
+    @Param('context') _context: string,
+    @Param('namespace') namespace: string,
+  ) {
+    return ApiEventsStore.listByNamespace(namespace, 300);
   }
 
   @Get('contexts/:context/namespaces/:namespace/rbac')

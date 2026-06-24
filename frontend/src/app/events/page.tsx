@@ -11,15 +11,28 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import { apiUrl } from '../../lib/backend';
 
 interface KubeEvent {
-  name: string;
+  id?: string;
+  name?: string;
   namespace: string;
-  reason: string;
-  message: string;
-  type: string;
-  firstTimestamp: string;
-  lastTimestamp: string;
-  count: number;
-  source: string;
+  reason?: string;
+  message?: string;
+  type?: string;
+  firstTimestamp?: string;
+  lastTimestamp?: string;
+  count?: number;
+  source?: string;
+  method?: string;
+  path?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  statusCode?: number;
+  responseBody?: string;
+  sourceIp?: string;
+  destIp?: string;
+  destPort?: number;
+  sourceService?: string;
+  destService?: string;
+  timestamp?: string;
 }
 
 export default function EventsPage() {
@@ -27,12 +40,13 @@ export default function EventsPage() {
   const [events, setEvents] = useState<KubeEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<KubeEvent | null>(null);
 
   const fetchEvents = () => {
     if (!selectedContext || !selectedNamespace) return;
     setLoading(true);
     setError(null);
-    fetch(apiUrl(`/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/events`))
+    fetch(apiUrl(`/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/api-traces`))
       .then((res) => {
         if (!res.ok) throw new Error('Failed to fetch events');
         return res.json();
@@ -41,7 +55,7 @@ export default function EventsPage() {
         // Sort events by lastTimestamp descending
         const sorted = (data || []).sort(
           (a: KubeEvent, b: KubeEvent) =>
-            new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime()
+            new Date(b.timestamp || b.lastTimestamp || 0).getTime() - new Date(a.timestamp || a.lastTimestamp || 0).getTime()
         );
         setEvents(sorted);
         setLoading(false);
@@ -87,7 +101,7 @@ export default function EventsPage() {
           {loading && events.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center space-y-3">
               <div className="w-8 h-8 rounded-full border-2 border-primary-container border-t-transparent animate-spin" />
-              <Typography variant="body" className="text-outline">Loading cluster events...</Typography>
+              <Typography variant="body" className="text-outline">Loading API traces...</Typography>
             </div>
           ) : error ? (
             <div className="flex-1 flex flex-col items-center justify-center space-y-2 text-error">
@@ -97,7 +111,7 @@ export default function EventsPage() {
           ) : events.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center space-y-2 text-outline">
               <InfoIcon fontSize="large" />
-              <Typography variant="body">No recent events found in this namespace.</Typography>
+              <Typography variant="body">No API traces found in this namespace yet.</Typography>
             </div>
           ) : (
             <div className="flex-1 overflow-auto terminal-scroll">
@@ -105,16 +119,20 @@ export default function EventsPage() {
                 <thead>
                   <tr className="border-b border-white/5 bg-surface-container-low/60 text-outline text-xs font-semibold uppercase tracking-wider">
                     <th className="px-6 py-4">Type</th>
-                    <th className="px-6 py-4">Reason</th>
-                    <th className="px-6 py-4">Message</th>
+                    <th className="px-6 py-4">Endpoint</th>
                     <th className="px-6 py-4">Source</th>
-                    <th className="px-6 py-4 text-center">Count</th>
+                    <th className="px-6 py-4">Destination</th>
+                    <th className="px-6 py-4 text-center">Status</th>
+                    <th className="px-6 py-4 text-center">Action</th>
                     <th className="px-6 py-4 text-right">Last Seen</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {events.map((evt, idx) => {
-                    const isWarning = evt.type === 'Warning';
+                    const statusCode = evt.statusCode || 0;
+                    const isWarning = statusCode >= 400;
+                    const endpoint = evt.url || evt.path || evt.message || '-';
+                    const typeLabel = evt.method || evt.type || 'TRACE';
                     return (
                       <tr key={idx} className="hover:bg-surface-container/20 transition-colors text-sm">
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -123,23 +141,31 @@ export default function EventsPage() {
                               ? 'bg-error-container/20 text-error border border-error-container/40' 
                               : 'bg-primary-container/10 text-primary-fixed border border-primary-container/20'
                           }`}>
-                            {evt.type}
+                            {typeLabel}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap font-medium text-on-surface">
-                          {evt.reason}
-                        </td>
-                        <td className="px-6 py-4 text-on-surface-variant max-w-md truncate" title={evt.message}>
-                          {evt.message}
+                          <span className="font-mono">{endpoint}</span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-outline">
-                          {evt.source}
+                          {evt.sourceService || evt.sourceIp || '-'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-outline">
+                          {evt.destService || evt.destIp || '-'}
                         </td>
                         <td className="px-6 py-4 text-center text-on-surface font-mono">
-                          {evt.count}
+                          {evt.statusCode ?? '-'}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <button
+                            onClick={() => setSelectedEvent(evt)}
+                            className="px-2 py-1 rounded border border-white/10 hover:bg-surface-container text-xs"
+                          >
+                            View
+                          </button>
                         </td>
                         <td className="px-6 py-4 text-right whitespace-nowrap text-outline text-xs">
-                          {new Date(evt.lastTimestamp).toLocaleTimeString()}
+                          {new Date(evt.timestamp || evt.lastTimestamp || Date.now()).toLocaleTimeString()}
                         </td>
                       </tr>
                     );
@@ -149,6 +175,25 @@ export default function EventsPage() {
             </div>
           )}
         </div>
+
+        {selectedEvent && (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+            <div className="w-full max-w-3xl glass-panel rounded-xl p-5 max-h-[80vh] overflow-auto">
+              <div className="flex items-center justify-between mb-4">
+                <Typography variant="h2" className="text-on-surface">API Trace Details</Typography>
+                <button
+                  onClick={() => setSelectedEvent(null)}
+                  className="px-2 py-1 rounded border border-white/10 hover:bg-surface-container text-xs"
+                >
+                  Close
+                </button>
+              </div>
+              <pre className="text-xs text-on-surface-variant whitespace-pre-wrap break-all">
+{JSON.stringify(selectedEvent, null, 2)}
+              </pre>
+            </div>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );
