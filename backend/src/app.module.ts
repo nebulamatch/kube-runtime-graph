@@ -8,7 +8,7 @@ import { HealthController } from './health/health.controller';
 
 @Module({
   imports: [GraphModule, KubeModule],
-  controllers: [AppController, DebugController, HealthController],
+  controllers: [AppController, HealthController],
   providers: [AppService],
 })
 export class AppModule {}
