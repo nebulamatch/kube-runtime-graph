@@ -20,6 +20,7 @@ export class GraphGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private interval: NodeJS.Timeout | null = null;
   private logStreams: Map<string, any> = new Map();
+  private clientSelections: Map<string, { context: string; namespace: string }> = new Map();
   // Telemetry buffering to batch frequent telemetry updates and reduce socket churn
   private telemetryBuffer: any[] = [];
   private telemetryFlushMs = 300;
@@ -66,6 +67,7 @@ export class GraphGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   handleDisconnect(client: Socket) {
     console.log(`Client disconnected: ${client.id}`);
+    this.clientSelections.delete(client.id);
     if (this.server.sockets.sockets.size === 0 && this.interval) {
       clearInterval(this.interval);
       this.interval = null;
@@ -81,6 +83,7 @@ export class GraphGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('requestUpdate')
   async handleRequestUpdate(client: Socket, payload: { context: string; namespace: string }) {
     if (!payload?.context || !payload?.namespace) return;
+    this.clientSelections.set(client.id, { context: payload.context, namespace: payload.namespace });
     const data = await this.graphService.getGraphData(payload.context, payload.namespace);
     client.emit('graphUpdate', data);
   }
@@ -90,6 +93,16 @@ export class GraphGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!context || !namespace) return;
     const data = await this.graphService.getGraphData(context, namespace);
     this.server.emit('graphUpdate', data);
+  }
+
+  async broadcastFreshGraphToMatchingClients() {
+    const entries = Array.from(this.clientSelections.entries());
+    for (const [clientId, selection] of entries) {
+      const socket = this.server.sockets.sockets.get(clientId);
+      if (!socket) continue;
+      const data = await this.graphService.getGraphData(selection.context, selection.namespace);
+      socket.emit('graphUpdate', data);
+    }
   }
 
   @SubscribeMessage('subscribeLogs')

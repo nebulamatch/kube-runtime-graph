@@ -3,7 +3,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNodesState, useEdgesState, MarkerType } from 'reactflow';
 import { io } from 'socket.io-client';
-import dagre from 'dagre';
 import { DashboardLayout } from '../components/templates/DashboardLayout';
 import { GraphCanvas } from '../components/organisms/GraphCanvas';
 import { ActionPanel } from '../components/organisms/ActionPanel';
@@ -11,48 +10,9 @@ import { SplashScreen } from '../components/organisms/SplashScreen';
 import { useKubeGlobal } from '../context/KubeContext';
 import { socketUrl } from '../lib/backend';
 
-// Create dagre graph per-layout to avoid retaining state between runs
-
 const stripAnsi = (str: string) => {
   if (typeof str !== 'string') return str;
   return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-};
-
-const getLayoutedElements = (nodes: any[], edges: any[], direction = 'TB') => {
-  const isHorizontal = direction === 'LR';
-
-  // Work on shallow copies to avoid mutating upstream data
-  const nextNodes = nodes.map((n) => ({ ...n }));
-  const nextEdges = edges.map((e) => ({ ...e }));
-
-  const g = new dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: direction });
-
-  nextNodes.forEach((node) => {
-    g.setNode(node.id, { width: 280, height: 120 });
-  });
-
-  nextEdges.forEach((edge) => {
-    g.setEdge(edge.source, edge.target);
-  });
-
-  dagre.layout(g);
-
-  nextNodes.forEach((node) => {
-    const nodeWithPosition = g.node(node.id);
-    if (!nodeWithPosition) return;
-
-    node.targetPosition = isHorizontal ? 'left' : 'top';
-    node.sourcePosition = isHorizontal ? 'right' : 'bottom';
-
-    node.position = {
-      x: nodeWithPosition.x - 280 / 2,
-      y: nodeWithPosition.y - 120 / 2,
-    };
-  });
-
-  return { nodes: nextNodes, edges: nextEdges };
 };
 
 export default function Home() {
@@ -64,7 +24,6 @@ export default function Home() {
   const [logs, setLogs] = useState<string[]>([]);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const refreshDebounceRef = useRef<any>(null);
 
   useEffect(() => {
     // Artificial delay to show the awesome splash screen
@@ -99,7 +58,10 @@ export default function Home() {
         return;
       }
 
-      const mappedNodes = data.nodes.map((n: any) => ({ ...n, type: n.data?.type === 'service' ? 'custom' : 'pod' }));
+      const mappedNodes = data.nodes.map((n: any) => ({
+        ...n,
+        type: n.data?.type === 'service' || n.data?.type === 'db' ? 'custom' : 'pod',
+      }));
       const mappedEdges = data.edges.map((e: any) => {
         const sourceNode = data.nodes.find((n: any) => n.id === e.source);
         const targetNode = data.nodes.find((n: any) => n.id === e.target);
@@ -113,12 +75,10 @@ export default function Home() {
         };
       });
 
-      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(mappedNodes, mappedEdges, 'LR');
-
       // Merge nodes: update positions/data for existing, add new
       setNodes((prev) => {
         const prevMap = new Map(prev.map(n => [n.id, n]));
-        layoutedNodes.forEach(ln => {
+        mappedNodes.forEach(ln => {
           if (prevMap.has(ln.id)) {
             const existing = prevMap.get(ln.id)!;
             prevMap.set(ln.id, { ...existing, ...ln });
@@ -126,12 +86,12 @@ export default function Home() {
             prevMap.set(ln.id, ln);
           }
         });
-        // Keep ordering from layoutedNodes to reflect hierarchy
-        return layoutedNodes.map(n => prevMap.get(n.id)!);
+        // Keep ordering from backend to reflect hierarchy intent
+        return mappedNodes.map(n => prevMap.get(n.id)!).filter(Boolean);
       });
 
-      // Merge edges: replace or add, follow layoutedEdges set
-      setEdges(() => layoutedEdges);
+      // Replace edge set from backend snapshot
+      setEdges(() => mappedEdges);
     });
 
     // Handle telemetry deltas emitted from backend. The payload is expected to
@@ -199,25 +159,7 @@ export default function Home() {
         processTelemetry(payload);
       }
 
-      // Debounced layout update - recalculate layout when traffic arrives
-      if (layoutDebounceRef.current) clearTimeout(layoutDebounceRef.current);
-      layoutDebounceRef.current = setTimeout(() => {
-        setNodes((curNodes) => {
-          const layoutedNodes = curNodes.map(n => ({ ...n }));
-          setEdges((curEdges) => {
-            const { nodes: newLayoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-              layoutedNodes.map(n => ({ ...n, type: n.type || 'pod' })), 
-              curEdges.map(e => ({ ...e })), 
-              'LR'
-            );
-            setTimeout(() => {
-              setEdges(layoutedEdges);
-            }, 0);
-            return layoutedEdges;
-          });
-          return layoutedNodes;
-        });
-      }, 300);
+      // No client-side auto-layout here; backend controls hierarchy positions.
     });
 
     newSocket.on('logUpdate', (data) => {

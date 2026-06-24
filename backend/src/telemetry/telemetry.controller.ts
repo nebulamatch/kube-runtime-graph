@@ -10,7 +10,7 @@ export interface TelemetryPayload {
 
 @Controller('api/telemetry')
 export class TelemetryController {
-  private broadcastTimers: Map<string, NodeJS.Timeout> = new Map();
+  private broadcastTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly graphService: GraphService,
@@ -34,19 +34,19 @@ export class TelemetryController {
       }
     }
 
-    // Debounce a fresh graph broadcast so topology can reflow after traffic changes.
-    const key = `${payload.sourceIp}::${payload.destIp}::${payload.destPort}`;
-    const existing = this.broadcastTimers.get(key);
-    if (existing) clearTimeout(existing);
-    this.broadcastTimers.set(
-      key,
-      setTimeout(() => {
-        // Broadcast to all connected clients using the current namespace selection is
-        // handled on the client side by requesting a fresh update after telemetry.
-        // This timer exists to avoid bursty update storms.
-        this.broadcastTimers.delete(key);
-      }, 200),
-    );
+    // If topology changed (new service relationship), broadcast a fresh graph
+    // to currently connected clients so hierarchy/positions can reflow.
+    const topologyChanged = !!(result && (result as any).topologyChanged);
+    if (topologyChanged) {
+      if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
+      this.broadcastTimer = setTimeout(async () => {
+        try {
+          await this.graphGateway.broadcastFreshGraphToMatchingClients();
+        } catch {
+          // best-effort only
+        }
+      }, 250);
+    }
     
     return { status: 'success' };
   }

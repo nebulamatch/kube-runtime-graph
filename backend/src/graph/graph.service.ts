@@ -146,7 +146,7 @@ export class GraphService {
     // Gateway/API patterns
     if (/gateway|api|ingress|loadbalancer|frontend|ui|web/.test(lower)) return 'gateway';
     // Database patterns
-    if (/db|database|postgres|mysql|mongo|redis|cache|supabase|dynamodb|elasticsearch|kafka/i.test(lower)) return 'database';
+    if (/db|database|postgres|mysql|mongo|redis|cache|supabase|dynamodb|elasticsearch|kafka|pg|rds|aurora|cockroach|timescale/i.test(lower)) return 'database';
     // Default to microservice for most service names
     return 'microservice';
   }
@@ -499,11 +499,15 @@ export class GraphService {
       const sourceLabel = sourceServiceId ? sourceServiceId.replace('svc-', '') : (sourcePodId ? sourcePodId.replace('pod-', '') : 'unknown');
 
       // Track service-to-service relationships for hierarchical layout
+      let topologyChanged = false;
       if (sourceServiceId && destServiceId && sourceServiceId !== destServiceId) {
         if (!this.serviceCallGraph.has(sourceServiceId)) {
           this.serviceCallGraph.set(sourceServiceId, new Set());
         }
-        this.serviceCallGraph.get(sourceServiceId)!.add(destServiceId);
+        const targets = this.serviceCallGraph.get(sourceServiceId)!;
+        const before = targets.size;
+        targets.add(destServiceId);
+        topologyChanged = targets.size > before;
       }
 
       const edge = {
@@ -528,6 +532,7 @@ export class GraphService {
 
       return {
         edge,
+        topologyChanged,
         newNodes: newNodes.length > 0 ? newNodes : undefined
       };
     }
