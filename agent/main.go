@@ -166,6 +166,16 @@ func main() {
 			method := parts[0]
 			path := parts[1]
 
+			// Prevent infinite loop by ignoring our own telemetry requests
+			if strings.Contains(path, "/api/telemetry") {
+				continue
+			}
+
+			// Ignore cloud metadata spam
+			if dstIp.String() == "169.254.169.254" || dstIp.String() == "168.63.129.16" {
+				continue
+			}
+
 			log.Printf("HTTP Intercept: %s %s -> %s:%d %s", method, srcIp, dstIp, dport, path)
 
 			payload := TelemetryPayload{
