@@ -29,6 +29,7 @@ export class GraphService {
   private ipToServiceCache: Map<string, string> = new Map(); // IP -> svcId
   private ipToDbCache: Map<string, string> = new Map(); // IP -> dbNodeId
   private discoveredDbs: Map<string, Node> = new Map(); // dbNodeId -> Node
+  private activeEdges: Map<string, Edge> = new Map(); // EdgeId -> Edge
 
   async getGraphData(contextName: string, namespace: string) {
     if (!contextName || !namespace) {
@@ -174,6 +175,15 @@ export class GraphService {
         nodes.push(dbNode);
       });
 
+      // Inject active telemetry edges
+      Array.from(this.activeEdges.values()).forEach(edge => {
+        const sourceExists = nodes.some(n => n.id === edge.source);
+        const targetExists = nodes.some(n => n.id === edge.target);
+        if (sourceExists && targetExists) {
+          edges.push(edge);
+        }
+      });
+
       return { nodes, edges };
     } catch (error) {
       console.error('Error fetching graph data from K8s', error);
@@ -216,19 +226,23 @@ export class GraphService {
     }
 
     if (sourceNodeId && destNodeId) {
+      const edge = {
+        id: `t-${sourceNodeId}-${destNodeId}-${payload.destPort}`,
+        source: sourceNodeId,
+        target: destNodeId,
+        animated: true,
+        label: payload.method && payload.path ? `${payload.method} ${payload.path}` : undefined,
+        style: { stroke: '#10b981', strokeWidth: 3 },
+        data: { 
+          port: payload.destPort,
+          endpoint: payload.method && payload.path ? `${payload.method} ${payload.path}` : undefined
+        }
+      };
+      
+      this.activeEdges.set(edge.id, edge);
+
       return {
-        edge: {
-          id: `t-${sourceNodeId}-${destNodeId}-${payload.destPort}`,
-          source: sourceNodeId,
-          target: destNodeId,
-          animated: true,
-          label: payload.method && payload.path ? `${payload.method} ${payload.path}` : undefined,
-          style: { stroke: '#10b981', strokeWidth: 3 },
-          data: { 
-            port: payload.destPort,
-            endpoint: payload.method && payload.path ? `${payload.method} ${payload.path}` : undefined
-          }
-        },
+        edge,
         newNodes: newNodes.length > 0 ? newNodes : undefined
       };
     }
