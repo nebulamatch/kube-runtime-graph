@@ -3,8 +3,18 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import * as k8s from '@kubernetes/client-node';
 import * as stream from 'stream';
 
+interface CacheEntry<T> {
+  ts: number;
+  data: T;
+}
+
 @Injectable()
 export class KubeService {
+  // In-memory caches with TTL
+  private eventCache: Map<string, CacheEntry<any[]>> = new Map();
+  private podsCache: Map<string, CacheEntry<any[]>> = new Map();
+  private readonly eventCacheTtlMs = 5000; // 5 seconds
+  private readonly podsCacheTtlMs = 5000; // 5 seconds
   private loadConfig(contextName?: string): k8s.KubeConfig {
     const kc = new k8s.KubeConfig();
     if (process.env.KUBERNETES_SERVICE_HOST) {
@@ -67,15 +77,26 @@ export class KubeService {
 
   async getPods(contextName: string, namespace: string) {
     try {
+      const cacheKey = `${contextName}::${namespace}`;
+      const cached = this.podsCache.get(cacheKey);
+      if (cached && Date.now() - cached.ts < this.podsCacheTtlMs) {
+        return cached.data;
+      }
+
       const kc = this.loadConfig(contextName);
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
       const res: any = await k8sApi.listNamespacedPod(namespace);
       const items = res.body ? res.body.items : res.items;
-      return items.map((pod: any) => ({
+      const pods = items.map((pod: any) => ({
         name: pod.metadata?.name,
         status: pod.status?.phase,
         namespace: pod.metadata?.namespace,
+        ip: pod.status?.podIP,
+        labels: pod.metadata?.labels || {},
       }));
+
+      this.podsCache.set(cacheKey, { ts: Date.now(), data: pods });
+      return pods;
     } catch (error: any) {
       console.error('Failed to list pods', error);
       throw new HttpException(
@@ -105,14 +126,27 @@ export class KubeService {
 
   async getEvents(contextName: string, namespace: string) {
     try {
+      const cacheKey = `${contextName}::${namespace}`;
+      const cached = this.eventCache.get(cacheKey);
+      if (cached && Date.now() - cached.ts < this.eventCacheTtlMs) {
+        return cached.data;
+      }
+
       const kc = this.loadConfig(contextName);
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
       const res: any = await k8sApi.listNamespacedEvent(namespace);
-      const items = res.body ? res.body.items : res.items;
-      // Filter to API-related events only (reduce noise). Heuristics:
-      // - source.component contains 'apiserver'
-      // - message contains HTTP verbs (GET, POST, PUT, DELETE)
-      // - reason indicates authentication/authorization failures
+      let items = res.body ? res.body.items : res.items;
+
+      // Sort by timestamp descending and take most recent 100
+      items = items
+        .sort((a: any, b: any) => {
+          const aTime = new Date(a.metadata?.creationTimestamp || 0).getTime();
+          const bTime = new Date(b.metadata?.creationTimestamp || 0).getTime();
+          return bTime - aTime;
+        })
+        .slice(0, 100);
+
+      // Filter to API-related events only
       const apiRelated = items.filter((evt: any) => {
         const src = (evt.source?.component || '').toLowerCase();
         const msg = (evt.message || '').toLowerCase();
@@ -124,7 +158,7 @@ export class KubeService {
         return false;
       });
 
-      return apiRelated.map((evt: any) => ({
+      const result = apiRelated.map((evt: any) => ({
         name: evt.metadata?.name,
         namespace: evt.metadata?.namespace,
         reason: evt.reason,
@@ -135,6 +169,9 @@ export class KubeService {
         count: evt.count,
         source: evt.source?.component || 'unknown',
       }));
+
+      this.eventCache.set(cacheKey, { ts: Date.now(), data: result });
+      return result;
     } catch (error: any) {
       console.error('Failed to list events', error);
       throw new HttpException(

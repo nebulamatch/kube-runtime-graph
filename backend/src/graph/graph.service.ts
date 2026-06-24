@@ -78,16 +78,17 @@ export class GraphService {
       const nodes: Node[] = [];
       const edges: Edge[] = [];
 
-      let xOffset = 100;
       let yOffset = 50;
+      const serviceNodeWidth = 320;
+      const horizontalSpacing = 350;
 
-      // Map Services
-      servicesItems.forEach((svc: any) => {
+      // Map Services as PRIMARY nodes (main focus)
+      servicesItems.forEach((svc: any, index: number) => {
         const svcId = `svc-${svc.metadata.name}`;
         nodes.push({
           id: svcId,
           type: 'custom',
-          position: { x: xOffset, y: yOffset },
+          position: { x: index * horizontalSpacing + 100, y: yOffset },
           data: {
             label: svc.metadata.name,
             type: 'service',
@@ -96,18 +97,12 @@ export class GraphService {
             errorRate: 0,
           },
         });
-        
-        xOffset += 300;
-        if (xOffset > 800) {
-          xOffset = 100;
-          yOffset += 200;
-        }
 
-        // Map Pods for this Service (basic label matching)
-        // A simple heuristic: check if pod name starts with service name
-        // Or if pod labels match service selector (more accurate)
+        // Get selector for this service
         const selector = svc.spec?.selector;
         
+        // Find pods matching this service and position them below the service
+        const matchingPods: any[] = [];
         podsItems.forEach((pod: any) => {
           let matches = false;
           if (selector) {
@@ -115,44 +110,50 @@ export class GraphService {
               key => pod.metadata.labels && pod.metadata.labels[key] === selector[key]
             );
           } else {
-            // Fallback heuristic
             matches = pod.metadata.name.startsWith(svc.metadata.name);
           }
 
           if (matches) {
-            const podId = `pod-${pod.metadata.name}`;
-            // Avoid duplicate pods if they match multiple services
-            if (!nodes.find(n => n.id === podId)) {
-              nodes.push({
-                id: podId,
-                type: 'custom',
-                position: { x: xOffset - 300 + (Math.random() * 100 - 50), y: yOffset + 150 },
-                data: {
-                  label: pod.metadata.name,
-                  type: 'pod',
-                  rps: 0,
-                  latency: '0ms',
-                  errorRate: 0,
-                  status: pod.status?.phase,
-                },
-              });
-            }
-            
-            if (pod.status?.podIP) {
-              this.ipToServiceCache.set(pod.status.podIP, svcId);
-              // Also store in podCache in case we want pod-level fallback
-              this.podCache.set(pod.status.podIP, podId);
-            }
-            
-            // Connect Pod to Service
-            edges.push({
-              id: `e-${podId}-${svcId}`,
-              source: podId,
-              target: svcId,
-              animated: true,
-              style: { stroke: '#9ca3af' },
+            matchingPods.push(pod);
+          }
+        });
+
+        // Position pods vertically below service
+        matchingPods.forEach((pod, podIndex) => {
+          const podId = `pod-${pod.metadata.name}`;
+          // Avoid duplicate pods
+          if (!nodes.find(n => n.id === podId)) {
+            nodes.push({
+              id: podId,
+              type: 'custom',
+              position: { 
+                x: index * horizontalSpacing + 100 + (podIndex * 50), 
+                y: yOffset + 180 
+              },
+              data: {
+                label: pod.metadata.name,
+                type: 'pod',
+                rps: 0,
+                latency: '0ms',
+                errorRate: 0,
+                status: pod.status?.phase,
+              },
             });
           }
+
+          if (pod.status?.podIP) {
+            this.ipToServiceCache.set(pod.status.podIP, svcId);
+            this.podCache.set(pod.status.podIP, podId);
+          }
+
+          // Connect Pod to Service with service reference
+          edges.push({
+            id: `e-${podId}-${svcId}`,
+            source: podId,
+            target: svcId,
+            animated: true,
+            style: { stroke: '#9ca3af' },
+          });
         });
       });
 
@@ -160,7 +161,6 @@ export class GraphService {
       podsItems.forEach((pod: any) => {
         const podId = `pod-${pod.metadata.name}`;
         
-        // Cache pod IP for telemetry mapping
         if (pod.status?.podIP) {
           this.podCache.set(pod.status.podIP, podId);
         }
@@ -169,7 +169,7 @@ export class GraphService {
           nodes.push({
             id: podId,
             type: 'custom',
-            position: { x: xOffset, y: yOffset },
+            position: { x: 100, y: yOffset + 400 },
             data: {
               label: pod.metadata.name,
               type: 'pod',
@@ -179,11 +179,7 @@ export class GraphService {
               status: pod.status?.phase,
             },
           });
-          xOffset += 200;
-          if (xOffset > 800) {
-            xOffset = 100;
-            yOffset += 200;
-          }
+          yOffset += 200;
         }
       });
 
@@ -252,6 +248,11 @@ export class GraphService {
     }
 
     if (sourceNodeId && destNodeId) {
+      // Extract source service name if source is a pod
+      const sourceServiceId = this.ipToServiceCache.get(payload.sourceIp);
+      const sourcePodId = this.podCache.get(payload.sourceIp);
+      const sourceLabel = sourceServiceId ? sourceServiceId.replace('svc-', '') : (sourcePodId ? sourcePodId.replace('pod-', '') : 'unknown');
+
       const edge = {
         id: `t-${sourceNodeId}-${destNodeId}-${payload.destPort}`,
         source: sourceNodeId,
@@ -261,7 +262,11 @@ export class GraphService {
         style: { stroke: '#10b981', strokeWidth: 3 },
         data: { 
           port: payload.destPort,
-          endpoint: payload.method && payload.path ? `${payload.method} ${payload.path}` : undefined
+          endpoint: payload.method && payload.path ? `${payload.method} ${payload.path}` : undefined,
+          sourceIp: payload.sourceIp,
+          destIp: payload.destIp,
+          originService: sourceLabel,
+          timestamp: new Date().toISOString(),
         }
       };
       

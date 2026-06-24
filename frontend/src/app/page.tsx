@@ -165,22 +165,25 @@ export default function Home() {
         processTelemetry(payload);
       }
 
-      // Debounced layout update
+      // Debounced layout update - recalculate layout when traffic arrives
       if (layoutDebounceRef.current) clearTimeout(layoutDebounceRef.current);
       layoutDebounceRef.current = setTimeout(() => {
-        // Re-run layout locally using current nodes/edges state
         setNodes((curNodes) => {
+          const layoutedNodes = curNodes.map(n => ({ ...n }));
           setEdges((curEdges) => {
-            const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(curNodes.map(n => ({ ...n, type: n.type || 'pod' })), curEdges.map(e => ({ ...e })), 'LR');
-            // Apply layouted nodes/edges
+            const { nodes: newLayoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+              layoutedNodes.map(n => ({ ...n, type: n.type || 'pod' })), 
+              curEdges.map(e => ({ ...e })), 
+              'LR'
+            );
             setTimeout(() => {
               setEdges(layoutedEdges);
             }, 0);
-            return layoutedNodes;
+            return layoutedEdges;
           });
-          return curNodes;
+          return layoutedNodes;
         });
-      }, 200);
+      }, 300);
     });
 
     newSocket.on('logUpdate', (data) => {
@@ -205,6 +208,7 @@ export default function Home() {
     setLogs([]);
     setIsPanelOpen(true);
     
+    // Only subscribe to logs if it's a pod
     if (socket && node.data?.type === 'pod' && selectedContext && selectedNamespace) {
       socket.emit('subscribeLogs', {
         context: selectedContext,
@@ -242,6 +246,8 @@ export default function Home() {
           onClose={handleClosePanel}
           podName={selectedNode?.data?.label || ''}
           logs={logs}
+          nodeData={selectedNode}
+          edges={edges}
         />
       </div>
     </DashboardLayout>
