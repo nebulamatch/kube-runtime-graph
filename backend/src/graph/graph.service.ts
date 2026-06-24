@@ -12,6 +12,8 @@ export interface Node {
     latency: string;
     errorRate: number;
     status?: string;
+    ip?: string;
+    namespace?: string;
   };
 }
 
@@ -30,6 +32,7 @@ export class GraphService {
   private readonly cacheTtlMs = 2000; // 2 seconds
   private podCache: Map<string, string> = new Map(); // IP -> podId
   private ipToServiceCache: Map<string, string> = new Map(); // IP -> svcId
+  private serviceIpCache: Map<string, string> = new Map(); // cluster/external IP -> svcId
   private ipToDbCache: Map<string, string> = new Map(); // IP -> dbNodeId
   private discoveredDbs: Map<string, Node> = new Map(); // dbNodeId -> Node
   private activeEdges: Map<string, Edge> = new Map(); // EdgeId -> Edge
@@ -66,6 +69,7 @@ export class GraphService {
       // Clear caches to prevent stale/dead pods from lingering
       this.podCache.clear();
       this.ipToServiceCache.clear();
+      this.serviceIpCache.clear();
 
       // Fetch Services
       const servicesRes: any = await k8sApi.listNamespacedService(namespace);
@@ -85,6 +89,21 @@ export class GraphService {
       // Map Services as PRIMARY nodes (main focus)
       servicesItems.forEach((svc: any, index: number) => {
         const svcId = `svc-${svc.metadata.name}`;
+        const svcClusterIp = svc.spec?.clusterIP;
+        const externalIps: string[] = Array.isArray(svc.spec?.externalIPs) ? svc.spec.externalIPs : [];
+        const lbIngressIps: string[] = Array.isArray(svc.status?.loadBalancer?.ingress)
+          ? svc.status.loadBalancer.ingress.map((ingress: any) => ingress.ip).filter(Boolean)
+          : [];
+
+        if (svcClusterIp && svcClusterIp !== 'None') {
+          this.serviceIpCache.set(svcClusterIp, svcId);
+          this.ipToServiceCache.set(svcClusterIp, svcId);
+        }
+        [...externalIps, ...lbIngressIps].filter(Boolean).forEach((ip) => {
+          this.serviceIpCache.set(ip, svcId);
+          this.ipToServiceCache.set(ip, svcId);
+        });
+
         nodes.push({
           id: svcId,
           type: 'custom',
@@ -95,6 +114,8 @@ export class GraphService {
             rps: 0,
             latency: '0ms',
             errorRate: 0,
+            ip: svcClusterIp || externalIps[0] || lbIngressIps[0] || '',
+            namespace: svc.metadata?.namespace,
           },
         });
 
@@ -215,7 +236,7 @@ export class GraphService {
 
   async processTelemetry(payload: { sourceIp: string; destIp: string; destPort: number; method?: string; path?: string }) {
     let sourceNodeId = this.ipToServiceCache.get(payload.sourceIp) || this.podCache.get(payload.sourceIp);
-    let destNodeId = this.ipToServiceCache.get(payload.destIp) || this.podCache.get(payload.destIp);
+    let destNodeId = this.serviceIpCache.get(payload.destIp) || this.ipToServiceCache.get(payload.destIp) || this.podCache.get(payload.destIp);
 
     const newNodes: Node[] = [];
 

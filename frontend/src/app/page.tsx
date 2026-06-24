@@ -96,11 +96,11 @@ export default function Home() {
       const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
         data.nodes.map((n: any) => ({
           ...n,
-          type: 'pod',
+          type: n.data?.type === 'service' ? 'custom' : 'pod',
         })),
         data.edges.map((e: any) => ({
           ...e,
-          type: 'custom',
+          type: e.type || 'custom',
           markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--color-primary-container)' },
           style: { strokeWidth: 2, stroke: 'var(--color-primary-container)' },
           animated: true,
@@ -151,6 +151,12 @@ export default function Home() {
           }
           return [...prev, normalized];
         });
+      }
+
+      // When traffic changes, request a fresh graph snapshot so the layout can
+      // move service/pod/db nodes based on current relationships.
+      if (selectedContext && selectedNamespace) {
+        newSocket.emit('requestUpdate', { context: selectedContext, namespace: selectedNamespace });
       }
     };
 
