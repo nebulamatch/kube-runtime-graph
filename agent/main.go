@@ -65,30 +65,25 @@ func main() {
 
 	log.Println("Successfully attached kprobe to tcp_v4_connect")
 
-	// Attach socket filter to eth0
-	iface, err := net.InterfaceByName("eth0")
+	// Attach socket filter to ALL interfaces (Ifindex: 0)
+	sock, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(htons(syscall.ETH_P_ALL)))
 	if err != nil {
-		log.Printf("Could not find eth0: %s (skipping L7 capture)", err)
-	} else {
-		sock, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(htons(syscall.ETH_P_ALL)))
-		if err != nil {
-			log.Fatalf("Failed to create raw socket: %v", err)
-		}
-		defer syscall.Close(sock)
-
-		sll := syscall.SockaddrLinklayer{
-			Ifindex:  iface.Index,
-			Protocol: htons(syscall.ETH_P_ALL),
-		}
-		if err := syscall.Bind(sock, &sll); err != nil {
-			log.Fatalf("Failed to bind raw socket: %v", err)
-		}
-
-		if err := syscall.SetsockoptInt(sock, syscall.SOL_SOCKET, 50 /* SO_ATTACH_BPF */, objs.SocketHttpFilter.FD()); err != nil {
-			log.Fatalf("Failed to attach BPF socket filter: %v", err)
-		}
-		log.Println("Successfully attached socket filter to eth0 for L7 interception")
+		log.Fatalf("Failed to create raw socket: %v", err)
 	}
+	defer syscall.Close(sock)
+
+	sll := syscall.SockaddrLinklayer{
+		Ifindex:  0, // 0 means all interfaces
+		Protocol: htons(syscall.ETH_P_ALL),
+	}
+	if err := syscall.Bind(sock, &sll); err != nil {
+		log.Fatalf("Failed to bind raw socket to all interfaces: %v", err)
+	}
+
+	if err := syscall.SetsockoptInt(sock, syscall.SOL_SOCKET, 50 /* SO_ATTACH_BPF */, objs.SocketHttpFilter.FD()); err != nil {
+		log.Fatalf("Failed to attach BPF socket filter: %v", err)
+	}
+	log.Println("Successfully attached socket filter to ALL interfaces for L7 interception")
 
 	// Open ringbuf readers
 	rd, err := ringbuf.NewReader(objs.Events)
