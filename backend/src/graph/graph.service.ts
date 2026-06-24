@@ -25,6 +25,9 @@ export interface Edge {
 
 @Injectable()
 export class GraphService {
+  // Simple in-memory cache for graph snapshots to avoid frequent K8s API calls
+  private graphCache: Map<string, { ts: number; data: { nodes: Node[]; edges: Edge[] } }> = new Map();
+  private readonly cacheTtlMs = 2000; // 2 seconds
   private podCache: Map<string, string> = new Map(); // IP -> podId
   private ipToServiceCache: Map<string, string> = new Map(); // IP -> svcId
   private ipToDbCache: Map<string, string> = new Map(); // IP -> dbNodeId
@@ -34,6 +37,12 @@ export class GraphService {
   async getGraphData(contextName: string, namespace: string) {
     if (!contextName || !namespace) {
       return { nodes: [], edges: [] };
+    }
+
+    const cacheKey = `${contextName}::${namespace}`;
+    const cached = this.graphCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < this.cacheTtlMs) {
+      return { nodes: cached.data.nodes.slice(), edges: cached.data.edges.slice() };
     }
 
     try {
@@ -195,6 +204,13 @@ export class GraphService {
       });
 
       return { nodes, edges };
+    } finally {
+      // store into cache (best-effort)
+      try {
+        this.graphCache.set(cacheKey, { ts: Date.now(), data: { nodes, edges } });
+      } catch (e) {
+        // ignore cache errors
+      }
     } catch (error) {
       console.error('Error fetching graph data from K8s', error);
       return { nodes: [], edges: [] };

@@ -109,7 +109,22 @@ export class KubeService {
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
       const res: any = await k8sApi.listNamespacedEvent(namespace);
       const items = res.body ? res.body.items : res.items;
-      return items.map((evt: any) => ({
+      // Filter to API-related events only (reduce noise). Heuristics:
+      // - source.component contains 'apiserver'
+      // - message contains HTTP verbs (GET, POST, PUT, DELETE)
+      // - reason indicates authentication/authorization failures
+      const apiRelated = items.filter((evt: any) => {
+        const src = (evt.source?.component || '').toLowerCase();
+        const msg = (evt.message || '').toLowerCase();
+        const reason = (evt.reason || '').toLowerCase();
+
+        if (src.includes('apiserver')) return true;
+        if (/\b(get|post|put|delete)\b/.test(msg)) return true;
+        if (reason.includes('unauthorized') || reason.includes('forbidden') || reason.includes('failed')) return true;
+        return false;
+      });
+
+      return apiRelated.map((evt: any) => ({
         name: evt.metadata?.name,
         namespace: evt.metadata?.namespace,
         reason: evt.reason,

@@ -20,11 +20,43 @@ export class GraphGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private interval: NodeJS.Timeout | null = null;
   private logStreams: Map<string, any> = new Map();
+  // Telemetry buffering to batch frequent telemetry updates and reduce socket churn
+  private telemetryBuffer: any[] = [];
+  private telemetryFlushMs = 300;
+  private telemetryFlushTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly graphService: GraphService,
     private readonly kubeService: KubeService,
   ) {}
+
+  // Enqueue a telemetry delta (edge/newNodes) to be flushed to clients periodically
+  enqueueTelemetry(delta: any) {
+    if (!delta) return;
+    this.telemetryBuffer.push(delta);
+
+    if (!this.telemetryFlushTimer) {
+      this.telemetryFlushTimer = setInterval(() => this.flushTelemetry(), this.telemetryFlushMs);
+    }
+  }
+
+  private flushTelemetry() {
+    if (this.telemetryBuffer.length === 0) return;
+    const items = this.telemetryBuffer.splice(0, this.telemetryBuffer.length);
+
+    if (items.length === 1) {
+      // keep backward compatibility: single payload contains {edge, newNodes}
+      this.server.emit('telemetryUpdate', items[0]);
+    } else {
+      // emit batched payload
+      this.server.emit('telemetryUpdate', { batch: true, items });
+    }
+    // if buffer emptied, stop timer until next enqueue
+    if (this.telemetryBuffer.length === 0 && this.telemetryFlushTimer) {
+      clearInterval(this.telemetryFlushTimer);
+      this.telemetryFlushTimer = null;
+    }
+  }
 
   handleConnection(client: Socket) {
     console.log(`Client connected: ${client.id}`);

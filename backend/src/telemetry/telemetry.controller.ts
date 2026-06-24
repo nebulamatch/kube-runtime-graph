@@ -21,11 +21,15 @@ export class TelemetryController {
     if (!payload.sourceIp || !payload.destIp) return { status: 'ignored' };
 
     // Ask GraphService to map these IPs to an Edge
-    const edge = await this.graphService.processTelemetry(payload);
-    
-    // Broadcast the new Edge to the connected React Flow clients
-    if (edge) {
-      this.graphGateway.server.emit('telemetryUpdate', edge);
+    const result = await this.graphService.processTelemetry(payload);
+    // Enqueue the result to GraphGateway for buffered/batched emission to clients
+    if (result) {
+      try {
+        this.graphGateway.enqueueTelemetry(result);
+      } catch (e) {
+        // fallback to immediate emit when enqueue not available
+        this.graphGateway.server.emit('telemetryUpdate', result);
+      }
     }
     
     return { status: 'success' };
