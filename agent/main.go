@@ -28,11 +28,15 @@ type bpfEvent struct {
 }
 
 type TelemetryPayload struct {
-	SourceIp string `json:"sourceIp"`
-	DestIp   string `json:"destIp"`
-	DestPort uint16 `json:"destPort"`
-	Method   string `json:"method,omitempty"`
-	Path     string `json:"path,omitempty"`
+	SourceIp     string            `json:"sourceIp"`
+	DestIp       string            `json:"destIp"`
+	DestPort     uint16            `json:"destPort"`
+	Method       string            `json:"method,omitempty"`
+	Path         string            `json:"path,omitempty"`
+	URL          string            `json:"url,omitempty"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	StatusCode   int               `json:"statusCode,omitempty"`
+	ResponseBody string            `json:"responseBody,omitempty"`
 }
 
 type bpfHttpEvent struct {
@@ -40,7 +44,7 @@ type bpfHttpEvent struct {
 	Daddr   uint32
 	Dport   uint16
 	Sport   uint16
-	Payload [64]byte
+	Payload [256]byte
 }
 
 func main() {
@@ -161,33 +165,86 @@ func main() {
 		dport := (event.Dport >> 8) | (event.Dport << 8)
 
 		rawPayload := string(bytes.Trim(event.Payload[:], "\x00"))
-		parts := strings.SplitN(rawPayload, " ", 3)
-		if len(parts) >= 2 {
-			method := parts[0]
-			path := parts[1]
+		method, path, fullURL, parsedHeaders := parseHTTPRequest(rawPayload)
+		if method == "" || path == "" {
+			continue
+		}
 
-			// Prevent infinite loop by ignoring our own telemetry requests
-			if strings.Contains(path, "/api/telemetry") {
-				continue
-			}
+		// Prevent infinite loop by ignoring our own telemetry requests
+		if strings.Contains(path, "/api/telemetry") || strings.Contains(fullURL, "/api/telemetry") {
+			continue
+		}
 
-			// Ignore cloud metadata spam
-			if dstIp.String() == "169.254.169.254" || dstIp.String() == "168.63.129.16" {
-				continue
-			}
+		// Ignore cloud metadata spam
+		if dstIp.String() == "169.254.169.254" || dstIp.String() == "168.63.129.16" {
+			continue
+		}
 
-			log.Printf("HTTP Intercept: %s %s -> %s:%d %s", method, srcIp, dstIp, dport, path)
+		log.Printf("HTTP Intercept: %s %s -> %s:%d %s", method, srcIp, dstIp, dport, path)
 
-			payload := TelemetryPayload{
-				SourceIp: srcIp.String(),
-				DestIp:   dstIp.String(),
-				DestPort: dport,
-				Method:   method,
-				Path:     path,
-			}
-			go sendTelemetry(backendUrl, payload)
+		payload := TelemetryPayload{
+			SourceIp: srcIp.String(),
+			DestIp:   dstIp.String(),
+			DestPort: dport,
+			Method:   method,
+			Path:     path,
+			URL:      fullURL,
+			Headers:  parsedHeaders,
+		}
+		go sendTelemetry(backendUrl, payload)
+	}
+}
+
+func parseHTTPRequest(raw string) (method string, path string, fullURL string, headers map[string]string) {
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	lines := strings.Split(raw, "\n")
+	if len(lines) == 0 {
+		return "", "", "", nil
+	}
+
+	requestLine := strings.TrimSpace(lines[0])
+	parts := strings.SplitN(requestLine, " ", 3)
+	if len(parts) < 2 {
+		return "", "", "", nil
+	}
+
+	method = strings.TrimSpace(parts[0])
+	path = strings.TrimSpace(parts[1])
+	if method == "" || path == "" {
+		return "", "", "", nil
+	}
+
+	selectedHeaders := map[string]string{}
+	for _, line := range lines[1:] {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			break
+		}
+		idx := strings.Index(line, ":")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(line[:idx]))
+		value := strings.TrimSpace(line[idx+1:])
+		switch key {
+		case "host", "user-agent", "x-request-id", "traceparent", "content-type", "authorization":
+			selectedHeaders[key] = value
 		}
 	}
+
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		fullURL = path
+	} else if host, ok := selectedHeaders["host"]; ok && host != "" {
+		fullURL = "http://" + host + path
+	} else {
+		fullURL = path
+	}
+
+	if len(selectedHeaders) == 0 {
+		selectedHeaders = nil
+	}
+
+	return method, path, fullURL, selectedHeaders
 }
 
 func htons(i uint16) uint16 {

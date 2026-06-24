@@ -30,7 +30,7 @@ struct http_event {
     __u32 daddr;
     __u16 dport;
     __u16 sport;
-    char payload[64]; // raw http string
+    char payload[256]; // raw http payload prefix
 };
 
 struct {
