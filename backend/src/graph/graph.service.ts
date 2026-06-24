@@ -38,9 +38,17 @@ export class GraphService {
 
     try {
       const kc = new k8s.KubeConfig();
-      kc.loadFromDefault();
-      if (contextName && contextName !== 'in-cluster') {
-        kc.setCurrentContext(contextName);
+      if (process.env.KUBERNETES_SERVICE_HOST) {
+        kc.loadFromCluster();
+      } else {
+        kc.loadFromDefault();
+        if (contextName && contextName !== 'in-cluster' && contextName !== 'inClusterContext') {
+          try {
+            kc.setCurrentContext(contextName);
+          } catch (e) {
+            console.warn(`Failed to set context ${contextName}, using default`);
+          }
+        }
       }
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
 

@@ -5,13 +5,34 @@ import * as stream from 'stream';
 
 @Injectable()
 export class KubeService {
+  private loadConfig(contextName?: string): k8s.KubeConfig {
+    const kc = new k8s.KubeConfig();
+    if (process.env.KUBERNETES_SERVICE_HOST) {
+      kc.loadFromCluster();
+    } else {
+      kc.loadFromDefault();
+      if (contextName && contextName !== 'in-cluster' && contextName !== 'inClusterContext') {
+        try {
+          kc.setCurrentContext(contextName);
+        } catch (e) {
+          console.warn(`Failed to set context ${contextName}, using default`);
+        }
+      }
+    }
+    return kc;
+  }
+
   getContexts() {
     try {
       const kc = new k8s.KubeConfig();
-      kc.loadFromDefault();
+      if (process.env.KUBERNETES_SERVICE_HOST) {
+        kc.loadFromCluster();
+      } else {
+        kc.loadFromDefault();
+      }
       const contexts = kc.getContexts();
-      if (contexts.length === 0) {
-        return [{ name: 'in-cluster', cluster: 'in-cluster', user: 'service-account' }];
+      if (contexts.length === 0 || process.env.KUBERNETES_SERVICE_HOST) {
+        return [{ name: 'inClusterContext', cluster: 'inCluster', user: 'inClusterUser' }];
       }
       return contexts.map((c) => ({
         name: c.name,
@@ -26,11 +47,7 @@ export class KubeService {
 
   async getNamespaces(contextName: string) {
     try {
-      const kc = new k8s.KubeConfig();
-      kc.loadFromDefault();
-      if (contextName && contextName !== 'in-cluster') {
-        kc.setCurrentContext(contextName);
-      }
+      const kc = this.loadConfig(contextName);
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
       const res: any = await k8sApi.listNamespace();
       const items = res.body ? res.body.items : res.items;
@@ -46,11 +63,7 @@ export class KubeService {
 
   async getPods(contextName: string, namespace: string) {
     try {
-      const kc = new k8s.KubeConfig();
-      kc.loadFromDefault();
-      if (contextName && contextName !== 'in-cluster') {
-        kc.setCurrentContext(contextName);
-      }
+      const kc = this.loadConfig(contextName);
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
       const res: any = await k8sApi.listNamespacedPod(namespace);
       const items = res.body ? res.body.items : res.items;
@@ -70,11 +83,7 @@ export class KubeService {
 
   async streamPodLogs(contextName: string, namespace: string, podName: string, callback: (logLine: string) => void) {
     try {
-      const kc = new k8s.KubeConfig();
-      kc.loadFromDefault();
-      if (contextName && contextName !== 'in-cluster') {
-        kc.setCurrentContext(contextName);
-      }
+      const kc = this.loadConfig(contextName);
       const log = new k8s.Log(kc);
       const logStream = new stream.PassThrough();
       logStream.on('data', (chunk) => {
@@ -92,11 +101,7 @@ export class KubeService {
 
   async getEvents(contextName: string, namespace: string) {
     try {
-      const kc = new k8s.KubeConfig();
-      kc.loadFromDefault();
-      if (contextName && contextName !== 'in-cluster') {
-        kc.setCurrentContext(contextName);
-      }
+      const kc = this.loadConfig(contextName);
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
       const res: any = await k8sApi.listNamespacedEvent(namespace);
       const items = res.body ? res.body.items : res.items;
@@ -122,11 +127,7 @@ export class KubeService {
 
   async getRbac(contextName: string, namespace: string) {
     try {
-      const kc = new k8s.KubeConfig();
-      kc.loadFromDefault();
-      if (contextName && contextName !== 'in-cluster') {
-        kc.setCurrentContext(contextName);
-      }
+      const kc = this.loadConfig(contextName);
       const rbacApi = kc.makeApiClient(k8s.RbacAuthorizationV1Api);
       
       const rolesRes: any = await rbacApi.listNamespacedRole(namespace);
