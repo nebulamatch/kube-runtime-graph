@@ -13,6 +13,11 @@ import { useKubeGlobal } from '../context/KubeContext';
 const dagreGraph = new dagre.graphlib.Graph();
 dagreGraph.setDefaultEdgeLabel(() => ({}));
 
+const stripAnsi = (str: string) => {
+  if (typeof str !== 'string') return str;
+  return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+};
+
 const getLayoutedElements = (nodes: any[], edges: any[], direction = 'TB') => {
   const isHorizontal = direction === 'LR';
   dagreGraph.setGraph({ rankdir: direction });
@@ -91,7 +96,8 @@ export default function Home() {
           markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--color-primary-container)' },
           style: { strokeWidth: 2, stroke: 'var(--color-primary-container)' },
           animated: true,
-        }))
+        })),
+        'LR'
       );
       
       setNodes(layoutedNodes);
@@ -106,7 +112,8 @@ export default function Home() {
     });
 
     newSocket.on('logUpdate', (data) => {
-      setLogs((prev) => [...prev, data].slice(-100)); // Keep last 100 lines
+      const cleanLine = stripAnsi(data);
+      setLogs((prev) => [...prev, cleanLine].slice(-100)); // Keep last 100 lines
     });
 
     return () => {

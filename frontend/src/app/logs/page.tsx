@@ -15,6 +15,11 @@ interface Pod {
   namespace: string;
 }
 
+const stripAnsi = (str: string) => {
+  if (typeof str !== 'string') return str;
+  return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+};
+
 export default function LogsPage() {
   const { selectedContext, selectedNamespace } = useKubeGlobal();
   const [pods, setPods] = useState<Pod[]>([]);
@@ -59,7 +64,8 @@ export default function LogsPage() {
 
     newSocket.on('logUpdate', (logLine: string) => {
       if (isLive) {
-        setLogs((prev) => [...prev, logLine].slice(-500)); // Limit cache size
+        const cleanLine = stripAnsi(logLine);
+        setLogs((prev) => [...prev, cleanLine].slice(-500)); // Limit cache size
       }
     });
 

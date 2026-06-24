@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import ReactFlow, { Background, Controls, NodeTypes, EdgeTypes } from 'reactflow';
+import React, { useMemo, useEffect } from 'react';
+import ReactFlow, { Background, Controls, NodeTypes, EdgeTypes, useReactFlow, ReactFlowProvider } from 'reactflow';
 import { CustomPodNode } from '../molecules/CustomPodNode';
 import { Badge } from '../atoms/Badge';
 
@@ -47,7 +47,19 @@ const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, 
   );
 };
 
-export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, edges, onNodesChange, onEdgesChange, onNodeClick }) => {
+const GraphCanvasComponent: React.FC<GraphCanvasProps> = ({ nodes, edges, onNodesChange, onEdgesChange, onNodeClick }) => {
+  const { fitView } = useReactFlow();
+
+  // Auto fit view on node updates
+  useEffect(() => {
+    if (nodes.length > 0) {
+      const timer = setTimeout(() => {
+        fitView({ padding: 0.15, duration: 600 });
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [nodes, edges, fitView]);
+
   // Memoize nodeTypes and edgeTypes to prevent React Flow infinite re-render warning
   const nodeTypes: NodeTypes = useMemo(() => ({ pod: CustomPodNode }), []);
   const edgeTypes: EdgeTypes = useMemo(() => ({ custom: CustomEdge }), []);
@@ -64,12 +76,20 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, edges, onNodesC
         edgeTypes={edgeTypes}
         fitView
         className="bg-transparent"
-        minZoom={0.2}
+        minZoom={0.1}
         maxZoom={1.5}
       >
         <Background color="var(--outline-variant)" gap={24} size={1} />
         <Controls className="bg-surface-container-low border-white/10 fill-on-surface" />
       </ReactFlow>
     </div>
+  );
+};
+
+export const GraphCanvas: React.FC<GraphCanvasProps> = (props) => {
+  return (
+    <ReactFlowProvider>
+      <GraphCanvasComponent {...props} />
+    </ReactFlowProvider>
   );
 };
