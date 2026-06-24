@@ -99,13 +99,22 @@ export default function Home() {
           ...n,
           type: n.data?.type === 'service' ? 'custom' : 'pod',
         })),
-        data.edges.map((e: any) => ({
-          ...e,
-          type: e.type || 'custom',
-          markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--color-primary-container)' },
-          style: { strokeWidth: 2, stroke: 'var(--color-primary-container)' },
-          animated: true,
-        })),
+        data.edges.map((e: any) => {
+          // Check if this is a service-to-service edge
+          const sourceNode = data.nodes.find((n: any) => n.id === e.source);
+          const targetNode = data.nodes.find((n: any) => n.id === e.target);
+          const isServiceToService = sourceNode?.data?.type === 'service' && targetNode?.data?.type === 'service';
+          
+          return {
+            ...e,
+            type: e.type || 'custom',
+            markerEnd: { type: MarkerType.ArrowClosed, color: isServiceToService ? '#f97316' : 'var(--color-primary-container)' },
+            style: isServiceToService 
+              ? { strokeWidth: 4, stroke: '#f97316', strokeDasharray: '5,5' }
+              : { strokeWidth: 2, stroke: 'var(--color-primary-container)' },
+            animated: true,
+          };
+        }),
         'LR'
       );
       
@@ -135,6 +144,10 @@ export default function Home() {
       if (incomingEdge && incomingEdge.id) {
         setEdges((prev) => {
           const exists = prev.some((e) => e.id === incomingEdge.id);
+          
+          // Check if this is a service-to-service edge by looking at source/target IDs
+          const isServiceToService = incomingEdge.source?.startsWith('svc-') && incomingEdge.target?.startsWith('svc-');
+          
           const normalized = {
             id: incomingEdge.id,
             source: incomingEdge.source,
@@ -142,9 +155,11 @@ export default function Home() {
             animated: incomingEdge.animated ?? true,
             label: incomingEdge.label ?? undefined,
             data: incomingEdge.data ?? incomingEdge,
-            style: incomingEdge.style ?? incomingEdge.style,
+            style: isServiceToService 
+              ? { strokeWidth: 4, stroke: '#f97316', strokeDasharray: '5,5' }
+              : incomingEdge.style ?? { strokeWidth: 3, stroke: '#10b981' },
             type: incomingEdge.type ?? 'custom',
-            markerEnd: incomingEdge.markerEnd ?? { type: 1 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: isServiceToService ? '#f97316' : '#10b981' },
           } as any;
 
           if (exists) {

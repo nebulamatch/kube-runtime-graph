@@ -36,9 +36,65 @@ export class GraphService {
   private ipToDbCache: Map<string, string> = new Map(); // IP -> dbNodeId
   private discoveredDbs: Map<string, Node> = new Map(); // dbNodeId -> Node
   private activeEdges: Map<string, Edge> = new Map(); // EdgeId -> Edge
+  private serviceCallGraph: Map<string, Set<string>> = new Map(); // svcId -> Set of target svcIds
 
   private invalidateGraphCache() {
     this.graphCache.clear();
+  }
+
+  // Calculate hierarchy level for each service (0 = root/API services, higher = children)
+  private calculateServiceHierarchy(services: string[]): Map<string, number> {
+    const hierarchy = new Map<string, number>();
+    const visited = new Set<string>();
+    
+    // Find root services (those that call others but aren't called by anyone)
+    const callers = new Set(this.serviceCallGraph.keys());
+    const callees = new Set<string>();
+    for (const targets of this.serviceCallGraph.values()) {
+      targets.forEach(t => callees.add(t));
+    }
+    
+    let rootServices = Array.from(callers).filter(svc => !callees.has(svc));
+    if (rootServices.length === 0) {
+      // If no clear root, pick the one that calls the most
+      let maxCalls = 0;
+      rootServices = [Array.from(callers).sort((a, b) => 
+        (this.serviceCallGraph.get(b)?.size || 0) - (this.serviceCallGraph.get(a)?.size || 0)
+      )[0]].filter(Boolean);
+    }
+    
+    // BFS to assign levels
+    const queue: [string, number][] = rootServices.map(s => [s, 0]);
+    services.forEach(s => {
+      if (!callers.has(s) && !callees.has(s)) {
+        queue.push([s, 0]); // Isolated services are roots too
+      }
+    });
+
+    while (queue.length > 0) {
+      const [serviceId, level] = queue.shift()!;
+      if (visited.has(serviceId)) continue;
+      visited.add(serviceId);
+      hierarchy.set(serviceId, level);
+
+      const targets = this.serviceCallGraph.get(serviceId);
+      if (targets) {
+        targets.forEach(target => {
+          if (!visited.has(target)) {
+            queue.push([target, level + 1]);
+          }
+        });
+      }
+    }
+
+    // Any service not visited is at level 0
+    services.forEach(s => {
+      if (!hierarchy.has(s)) {
+        hierarchy.set(s, 0);
+      }
+    });
+
+    return hierarchy;
   }
 
   async getGraphData(contextName: string, namespace: string) {
@@ -86,12 +142,27 @@ export class GraphService {
       const nodes: Node[] = [];
       const edges: Edge[] = [];
 
-      let yOffset = 50;
-      const serviceNodeWidth = 320;
-      const horizontalSpacing = 350;
+      // First pass: build service IDs and hierarchy
+      const serviceIds = servicesItems.map((svc: any) => `svc-${svc.metadata.name}`);
+      const hierarchy = this.calculateServiceHierarchy(serviceIds);
 
-      // Map Services as PRIMARY nodes (main focus)
-      servicesItems.forEach((svc: any, index: number) => {
+      // Group services by hierarchy level
+      const servicesByLevel = new Map<number, any[]>();
+      servicesItems.forEach((svc: any) => {
+        const svcId = `svc-${svc.metadata.name}`;
+        const level = hierarchy.get(svcId) || 0;
+        if (!servicesByLevel.has(level)) {
+          servicesByLevel.set(level, []);
+        }
+        servicesByLevel.get(level)!.push(svc);
+      });
+
+      const levelSpacing = 300;
+      const startY = 50;
+      const startX = 100;
+
+      // Position services hierarchically: level 0 at top center, level 1 below and spread out, etc
+      servicesItems.forEach((svc: any) => {
         const svcId = `svc-${svc.metadata.name}`;
         const svcClusterIp = svc.spec?.clusterIP;
         const externalIps: string[] = Array.isArray(svc.spec?.externalIPs) ? svc.spec.externalIPs : [];
@@ -108,10 +179,19 @@ export class GraphService {
           this.ipToServiceCache.set(ip, svcId);
         });
 
+        // Calculate position based on hierarchy
+        const level = hierarchy.get(svcId) || 0;
+        const levelsServices = servicesByLevel.get(level) || [];
+        const indexInLevel = levelsServices.indexOf(svc);
+        const servicesInThisLevel = levelsServices.length;
+        const horizontalSpacing = 400;
+        const xOffset = startX + (indexInLevel - (servicesInThisLevel - 1) / 2) * horizontalSpacing;
+        const yOffset = startY + level * levelSpacing;
+
         nodes.push({
           id: svcId,
           type: 'custom',
-          position: { x: index * horizontalSpacing + 100, y: yOffset },
+          position: { x: xOffset, y: yOffset },
           data: {
             label: svc.metadata.name,
             type: 'service',
@@ -152,8 +232,8 @@ export class GraphService {
               id: podId,
               type: 'custom',
               position: { 
-                x: index * horizontalSpacing + 100 + (podIndex * 50), 
-                y: yOffset + 180 
+                x: xOffset + (podIndex - (matchingPods.length - 1) / 2) * 60, 
+                y: yOffset + 150 
               },
               data: {
                 label: pod.metadata.name,
@@ -183,6 +263,7 @@ export class GraphService {
       });
 
       // Add any orphaned pods (not matching any service)
+      let orphanYOffset = startY + (Math.max(...Array.from(hierarchy.values())) + 2) * levelSpacing;
       podsItems.forEach((pod: any) => {
         const podId = `pod-${pod.metadata.name}`;
         
@@ -194,7 +275,7 @@ export class GraphService {
           nodes.push({
             id: podId,
             type: 'custom',
-            position: { x: 100, y: yOffset + 400 },
+            position: { x: startX, y: orphanYOffset },
             data: {
               label: pod.metadata.name,
               type: 'pod',
@@ -204,7 +285,7 @@ export class GraphService {
               status: pod.status?.phase,
             },
           });
-          yOffset += 200;
+          orphanYOffset += 150;
         }
       });
 
@@ -275,8 +356,17 @@ export class GraphService {
     if (sourceNodeId && destNodeId) {
       // Extract source service name if source is a pod
       const sourceServiceId = this.ipToServiceCache.get(payload.sourceIp);
+      const destServiceId = this.ipToServiceCache.get(payload.destIp);
       const sourcePodId = this.podCache.get(payload.sourceIp);
       const sourceLabel = sourceServiceId ? sourceServiceId.replace('svc-', '') : (sourcePodId ? sourcePodId.replace('pod-', '') : 'unknown');
+
+      // Track service-to-service relationships for hierarchical layout
+      if (sourceServiceId && destServiceId && sourceServiceId !== destServiceId) {
+        if (!this.serviceCallGraph.has(sourceServiceId)) {
+          this.serviceCallGraph.set(sourceServiceId, new Set());
+        }
+        this.serviceCallGraph.get(sourceServiceId)!.add(destServiceId);
+      }
 
       const edge = {
         id: `t-${sourceNodeId}-${destNodeId}-${payload.destPort}`,
