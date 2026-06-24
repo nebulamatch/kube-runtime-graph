@@ -42,6 +42,55 @@ export class GraphService {
     this.graphCache.clear();
   }
 
+  // Fallback: resolve IPs by querying the Kubernetes API when caches miss.
+  // This helps when telemetry arrives before a client has requested a graph
+  // snapshot (so in-memory caches aren't populated yet).
+  private async resolveIpMappings(ips: string[]) {
+    try {
+      const kc = new k8s.KubeConfig();
+      if (process.env.KUBERNETES_SERVICE_HOST) {
+        kc.loadFromCluster();
+      } else {
+        kc.loadFromDefault();
+      }
+      const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
+
+      // List services across all namespaces and map clusterIP/external IPs
+      const servicesRes: any = await k8sApi.listServiceForAllNamespaces();
+      const servicesItems = servicesRes.body ? servicesRes.body.items : servicesRes.items;
+      servicesItems.forEach((svc: any) => {
+        const svcId = `svc-${svc.metadata.name}`;
+        const svcClusterIp = svc.spec?.clusterIP;
+        const externalIps: string[] = Array.isArray(svc.spec?.externalIPs) ? svc.spec?.externalIPs : [];
+        const lbIngressIps: string[] = Array.isArray(svc.status?.loadBalancer?.ingress)
+          ? svc.status.loadBalancer.ingress.map((ingress: any) => ingress.ip).filter(Boolean)
+          : [];
+
+        if (svcClusterIp && svcClusterIp !== 'None') {
+          this.serviceIpCache.set(svcClusterIp, svcId);
+          this.ipToServiceCache.set(svcClusterIp, svcId);
+        }
+        [...externalIps, ...lbIngressIps].filter(Boolean).forEach((ip) => {
+          this.serviceIpCache.set(ip, svcId);
+          this.ipToServiceCache.set(ip, svcId);
+        });
+      });
+
+      // List pods across all namespaces and map pod IPs
+      const podsRes: any = await k8sApi.listPodForAllNamespaces();
+      const podsItems = podsRes.body ? podsRes.body.items : podsRes.items;
+      podsItems.forEach((pod: any) => {
+        if (pod.status?.podIP) {
+          const podId = `pod-${pod.metadata.name}`;
+          this.podCache.set(pod.status.podIP, podId);
+        }
+      });
+    } catch (e) {
+      // non-fatal; if lookup fails we'll continue without resolving
+      console.warn('resolveIpMappings failed', e && e.message ? e.message : e);
+    }
+  }
+
   // Calculate hierarchy level for each service (0 = root/API services, higher = children)
   private calculateServiceHierarchy(services: string[]): Map<string, number> {
     const hierarchy = new Map<string, number>();
@@ -323,6 +372,15 @@ export class GraphService {
     let sourceNodeId = this.ipToServiceCache.get(payload.sourceIp) || this.podCache.get(payload.sourceIp);
     let destNodeId = this.serviceIpCache.get(payload.destIp) || this.ipToServiceCache.get(payload.destIp) || this.podCache.get(payload.destIp);
 
+    // If we don't have mappings yet, attempt a lightweight resolution against the
+    // cluster so telemetry arriving before a client-requested snapshot can still
+    // be mapped to nodes.
+    if ((!sourceNodeId || !destNodeId) && payload.sourceIp && payload.destIp) {
+      await this.resolveIpMappings([payload.sourceIp, payload.destIp]);
+      sourceNodeId = this.ipToServiceCache.get(payload.sourceIp) || this.podCache.get(payload.sourceIp) || sourceNodeId;
+      destNodeId = this.serviceIpCache.get(payload.destIp) || this.ipToServiceCache.get(payload.destIp) || this.podCache.get(payload.destIp) || destNodeId;
+    }
+
     const newNodes: Node[] = [];
 
     // DB Heuristic
@@ -399,5 +457,10 @@ export class GraphService {
   simulateTraffic() {
     // Traffic simulation is disabled for now as we transition to eBPF real data
     return null;
+  }
+
+  // For debugging: return a snapshot of active telemetry edges
+  getActiveEdges() {
+    return Array.from(this.activeEdges.values());
   }
 }
