@@ -50,9 +50,10 @@ metadata:
   name: kube-runtime-graph-backend
   namespace: kube-system
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: kube-runtime-graph-backend
   ports:
   - port: 3001
     targetPort: 3001
+    nodePort: 32001
