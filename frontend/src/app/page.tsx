@@ -77,8 +77,8 @@ export default function Home() {
 
       // Merge nodes: update positions/data for existing, add new
       setNodes((prev) => {
-        const prevMap = new Map(prev.map(n => [n.id, n]));
-        mappedNodes.forEach(ln => {
+        const prevMap = new Map(prev.map((n: any) => [n.id, n]));
+        mappedNodes.forEach((ln: any) => {
           if (prevMap.has(ln.id)) {
             const existing = prevMap.get(ln.id)!;
             prevMap.set(ln.id, { ...existing, ...ln });
@@ -87,7 +87,7 @@ export default function Home() {
           }
         });
         // Keep ordering from backend to reflect hierarchy intent
-        return mappedNodes.map(n => prevMap.get(n.id)!).filter(Boolean);
+        return mappedNodes.map((n: any) => prevMap.get(n.id)!).filter(Boolean);
       });
 
       // Replace edge set from backend snapshot
