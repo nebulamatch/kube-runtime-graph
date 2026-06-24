@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { apiUrl } from '../lib/backend';
 
 interface KubeContext {
   name: string;
@@ -26,7 +27,7 @@ export default function ClusterSelector({ onSelectionChange }: { onSelectionChan
   const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
-    fetch('http://localhost:3001/api/kube/contexts')
+    fetch(apiUrl('/api/kube/contexts'))
         .then(async res => {
           const data = await res.json();
           if (!res.ok) throw new Error(data.message || 'Failed to fetch contexts');
@@ -44,7 +45,7 @@ export default function ClusterSelector({ onSelectionChange }: { onSelectionChan
 
   useEffect(() => {
     if (selectedContext) {
-      fetch(`http://localhost:3001/api/kube/contexts/${selectedContext}/namespaces`)
+      fetch(apiUrl(`/api/kube/contexts/${selectedContext}/namespaces`))
         .then(async res => {
           const data = await res.json();
           if (!res.ok) throw new Error(data.message || 'Failed to fetch namespaces');

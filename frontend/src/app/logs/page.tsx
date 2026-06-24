@@ -8,6 +8,7 @@ import { io } from 'socket.io-client';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import SearchIcon from '@mui/icons-material/Search';
+import { apiUrl, socketUrl } from '../../lib/backend';
 
 interface Pod {
   name: string;
@@ -36,7 +37,7 @@ export default function LogsPage() {
   useEffect(() => {
     if (!selectedContext || !selectedNamespace) return;
     setLoadingPods(true);
-    fetch(`http://localhost:3001/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/pods`)
+    fetch(apiUrl(`/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/pods`))
       .then((res) => res.json())
       .then((data) => {
         setPods(data || []);
@@ -55,7 +56,7 @@ export default function LogsPage() {
 
   // Connect WebSockets
   useEffect(() => {
-    const newSocket = io('http://localhost:3001');
+    const newSocket = io(socketUrl);
     setSocket(newSocket);
 
     newSocket.on('connect', () => {

@@ -7,6 +7,7 @@ import { Typography } from '../../components/atoms/Typography';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ErrorIcon from '@mui/icons-material/Error';
 import SecurityIcon from '@mui/icons-material/Security';
+import { apiUrl } from '../../lib/backend';
 
 interface Role {
   name: string;
@@ -43,7 +44,7 @@ export default function RbacPage() {
     if (!selectedContext || !selectedNamespace) return;
     setLoading(true);
     setError(null);
-    fetch(`http://localhost:3001/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/rbac`)
+    fetch(apiUrl(`/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/rbac`))
       .then((res) => {
         if (!res.ok) throw new Error('Failed to fetch RBAC data');
         return res.json();

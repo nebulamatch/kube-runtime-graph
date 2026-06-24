@@ -9,6 +9,7 @@ import { GraphCanvas } from '../components/organisms/GraphCanvas';
 import { ActionPanel } from '../components/organisms/ActionPanel';
 import { SplashScreen } from '../components/organisms/SplashScreen';
 import { useKubeGlobal } from '../context/KubeContext';
+import { socketUrl } from '../lib/backend';
 
 // Create dagre graph per-layout to avoid retaining state between runs
 
@@ -75,7 +76,7 @@ export default function Home() {
   useEffect(() => {
     if (isLoading) return;
 
-    const newSocket = io('http://localhost:3001');
+    const newSocket = io(socketUrl);
     setSocket(newSocket);
 
     newSocket.on('connect', () => {

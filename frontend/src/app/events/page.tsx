@@ -8,6 +8,7 @@ import { StatusIndicator } from '../../components/atoms/StatusIndicator';
 import ErrorIcon from '@mui/icons-material/Error';
 import InfoIcon from '@mui/icons-material/Info';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import { apiUrl } from '../../lib/backend';
 
 interface KubeEvent {
   name: string;
@@ -31,7 +32,7 @@ export default function EventsPage() {
     if (!selectedContext || !selectedNamespace) return;
     setLoading(true);
     setError(null);
-    fetch(`http://localhost:3001/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/events`)
+    fetch(apiUrl(`/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/events`))
       .then((res) => {
         if (!res.ok) throw new Error('Failed to fetch events');
         return res.json();
@@ -54,8 +55,8 @@ export default function EventsPage() {
 
   useEffect(() => {
     fetchEvents();
-    // Refresh every 10s
-    const interval = setInterval(fetchEvents, 10000);
+    // Refresh every 30s to reduce backend pressure
+    const interval = setInterval(fetchEvents, 30000);
     return () => clearInterval(interval);
   }, [selectedContext, selectedNamespace]);
 
