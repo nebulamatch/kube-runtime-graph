@@ -203,14 +203,14 @@ export class GraphService {
         }
       });
 
-      return { nodes, edges };
-    } finally {
       // store into cache (best-effort)
       try {
         this.graphCache.set(cacheKey, { ts: Date.now(), data: { nodes, edges } });
       } catch (e) {
         // ignore cache errors
       }
+
+      return { nodes, edges };
     } catch (error) {
       console.error('Error fetching graph data from K8s', error);
       return { nodes: [], edges: [] };
