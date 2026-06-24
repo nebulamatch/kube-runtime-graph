@@ -37,6 +37,8 @@ export class GraphService {
   private discoveredDbs: Map<string, Node> = new Map(); // dbNodeId -> Node
   private activeEdges: Map<string, Edge> = new Map(); // EdgeId -> Edge
   private serviceCallGraph: Map<string, Set<string>> = new Map(); // svcId -> Set of target svcIds
+  private lastResolveAt = 0;
+  private lastResolveErrorAt = 0;
 
   private invalidateGraphCache() {
     this.graphCache.clear();
@@ -46,22 +48,42 @@ export class GraphService {
   // This helps when telemetry arrives before a client has requested a graph
   // snapshot (so in-memory caches aren't populated yet).
   private async resolveIpMappings(ips: string[]) {
+    // Throttle heavy lookups to at most once every 30s to avoid repeated
+    // failing network calls which can destabilize the process in constrained
+    // environments.
     try {
+      const now = Date.now();
+      if (now - this.lastResolveAt < 30_000) return;
+      this.lastResolveAt = now;
+
       const kc = new k8s.KubeConfig();
+      // If running in-cluster, prefer the cluster DNS name so requests go
+      // through the cluster DNS (kube-dns) instead of any external API
+      // endpoint present in KUBERNETES_SERVICE_HOST which may be unreachable
+      // from pods in some managed environments.
       if (process.env.KUBERNETES_SERVICE_HOST) {
+        process.env.KUBERNETES_SERVICE_HOST = 'kubernetes.default.svc';
+        process.env.KUBERNETES_SERVICE_PORT = '443';
         kc.loadFromCluster();
       } else {
         kc.loadFromDefault();
       }
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
 
+      const withTimeout = async <T>(p: Promise<T>, ms: number) => {
+        return await Promise.race<T>([
+          p,
+          new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)),
+        ] as any);
+      };
+
       // List services across all namespaces and map clusterIP/external IPs
-      const servicesRes: any = await k8sApi.listServiceForAllNamespaces();
+      const servicesRes: any = await withTimeout(k8sApi.listServiceForAllNamespaces(), 3000);
       const servicesItems = servicesRes.body ? servicesRes.body.items : servicesRes.items;
       servicesItems.forEach((svc: any) => {
         const svcId = `svc-${svc.metadata.name}`;
         const svcClusterIp = svc.spec?.clusterIP;
-        const externalIps: string[] = Array.isArray(svc.spec?.externalIPs) ? svc.spec?.externalIPs : [];
+        const externalIps: string[] = Array.isArray(svc.spec?.externalIPs) ? svc.spec.externalIPs : [];
         const lbIngressIps: string[] = Array.isArray(svc.status?.loadBalancer?.ingress)
           ? svc.status.loadBalancer.ingress.map((ingress: any) => ingress.ip).filter(Boolean)
           : [];
@@ -77,7 +99,7 @@ export class GraphService {
       });
 
       // List pods across all namespaces and map pod IPs
-      const podsRes: any = await k8sApi.listPodForAllNamespaces();
+      const podsRes: any = await withTimeout(k8sApi.listPodForAllNamespaces(), 3000);
       const podsItems = podsRes.body ? podsRes.body.items : podsRes.items;
       podsItems.forEach((pod: any) => {
         if (pod.status?.podIP) {
@@ -86,8 +108,13 @@ export class GraphService {
         }
       });
     } catch (e) {
-      // non-fatal; if lookup fails we'll continue without resolving
-      console.warn('resolveIpMappings failed', e && e.message ? e.message : e);
+      // non-fatal; if lookup fails we'll continue without resolving.
+      // Log at most once per minute to avoid log spam.
+      const now = Date.now();
+      if (now - this.lastResolveErrorAt > 60_000) {
+        console.warn('resolveIpMappings failed', e && e.message ? e.message : e);
+        this.lastResolveErrorAt = now;
+      }
     }
   }
 

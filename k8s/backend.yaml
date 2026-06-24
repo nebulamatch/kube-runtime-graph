@@ -43,19 +43,31 @@ spec:
         imagePullPolicy: Always
         ports:
         - containerPort: 3001
-        livenessProbe:
+        # Use a startupProbe to give the app time to initialize without
+        # being killed by the liveness probe. Readiness and liveness probes
+        # are relaxed to reduce race conditions during startup.
+        startupProbe:
           httpGet:
-            path: /api/health/live
+            path: /api/health/ready
             port: 3001
           initialDelaySeconds: 5
           periodSeconds: 10
-          failureThreshold: 6
+          failureThreshold: 30
         readinessProbe:
           httpGet:
             path: /api/health/ready
             port: 3001
-          initialDelaySeconds: 2
-          periodSeconds: 5
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /api/health/live
+            port: 3001
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 2
           failureThreshold: 3
 ---
 apiVersion: v1
