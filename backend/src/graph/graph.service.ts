@@ -77,8 +77,26 @@ export class GraphService {
         ] as any);
       };
 
+      const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+      // Retry helper with exponential backoff and increasing timeouts.
+      const attemptApiCall = async <T>(fn: () => Promise<T>) => {
+        const maxRetries = 2;
+        let lastErr: any = null;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          try {
+            const timeoutMs = 10000 * (attempt + 1); // 10s, then 20s
+            return await withTimeout(fn(), timeoutMs);
+          } catch (err) {
+            lastErr = err;
+            await sleep(500 * (attempt + 1));
+          }
+        }
+        throw lastErr;
+      };
+
       // List services across all namespaces and map clusterIP/external IPs
-      const servicesRes: any = await withTimeout(k8sApi.listServiceForAllNamespaces(), 3000);
+      const servicesRes: any = await attemptApiCall(() => k8sApi.listServiceForAllNamespaces());
       const servicesItems = servicesRes.body ? servicesRes.body.items : servicesRes.items;
       servicesItems.forEach((svc: any) => {
         const svcId = `svc-${svc.metadata.name}`;
@@ -99,7 +117,7 @@ export class GraphService {
       });
 
       // List pods across all namespaces and map pod IPs
-      const podsRes: any = await withTimeout(k8sApi.listPodForAllNamespaces(), 3000);
+      const podsRes: any = await attemptApiCall(() => k8sApi.listPodForAllNamespaces());
       const podsItems = podsRes.body ? podsRes.body.items : podsRes.items;
       podsItems.forEach((pod: any) => {
         if (pod.status?.podIP) {
@@ -109,12 +127,16 @@ export class GraphService {
       });
     } catch (e) {
       // non-fatal; if lookup fails we'll continue without resolving.
-      // Log at most once per minute to avoid log spam.
+      // Log at most once per minute to avoid log spam and temporarily
+      // disable further resolution attempts for a longer window to avoid
+      // repeated timeouts destabilizing the pod.
       const now = Date.now();
       if (now - this.lastResolveErrorAt > 60_000) {
         console.warn('resolveIpMappings failed', e && e.message ? e.message : e);
         this.lastResolveErrorAt = now;
       }
+      // Silence further attempts for 2 minutes after a persistent failure
+      this.lastResolveAt = Date.now() + 120_000;
     }
   }
 
