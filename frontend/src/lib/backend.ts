@@ -1,4 +1,4 @@
-const DEFAULT_BACKEND_URL = 'http://127.0.0.1:3001';
+const DEFAULT_BACKEND_URL = 'http://localhost:3001';
 
 export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || DEFAULT_BACKEND_URL;
 

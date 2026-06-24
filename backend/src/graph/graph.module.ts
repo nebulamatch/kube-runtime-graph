@@ -8,5 +8,6 @@ import { KubeModule } from '../kube/kube.module';
   imports: [KubeModule],
   controllers: [TelemetryController],
   providers: [GraphService, GraphGateway],
+  exports: [GraphService],
 })
 export class GraphModule {}
