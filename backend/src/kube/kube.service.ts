@@ -151,8 +151,16 @@ export class KubeService {
       logStream.on('data', (chunk) => {
         callback(chunk.toString());
       });
-      // follow: true holds the connection open to tail logs
-      const req = await log.log(namespace, podName, '', logStream, { follow: true, tailLines: 100, pretty: false, timestamps: false });
+      // follow: true holds the connection open to tail logs.
+      // Use a small historical window so the UI sees recent activity quickly,
+      // even when the pod was already emitting logs before subscription.
+      const req = await log.log(namespace, podName, '', logStream, {
+        follow: true,
+        tailLines: 200,
+        sinceSeconds: 300,
+        pretty: false,
+        timestamps: true,
+      });
       return req;
     } catch (error) {
       console.error(`Failed to stream logs for ${podName}`, error);
