@@ -462,7 +462,18 @@ export class GraphService {
     }
   }
 
-  async processTelemetry(payload: { sourceIp: string; destIp: string; destPort: number; method?: string; path?: string }) {
+  async processTelemetry(payload: {
+    sourceIp: string;
+    destIp: string;
+    destPort: number;
+    method?: string;
+    path?: string;
+    url?: string;
+    headers?: Record<string, string>;
+    statusCode?: number;
+    responseBody?: string;
+    durationMs?: number;
+  }) {
     let sourceNodeId = this.ipToServiceCache.get(payload.sourceIp) || this.podCache.get(payload.sourceIp);
     let destNodeId = this.serviceIpCache.get(payload.destIp) || this.ipToServiceCache.get(payload.destIp) || this.podCache.get(payload.destIp);
 
@@ -532,8 +543,16 @@ export class GraphService {
         label: payload.method && payload.path ? `${payload.method} ${payload.path}` : undefined,
         style: { stroke: '#10b981', strokeWidth: 3 },
         data: { 
+          protocol: payload.method && payload.path ? 'http' : 'tcp',
           port: payload.destPort,
           endpoint: payload.method && payload.path ? `${payload.method} ${payload.path}` : undefined,
+          method: payload.method,
+          path: payload.path,
+          url: payload.url,
+          headers: payload.headers,
+          statusCode: payload.statusCode,
+          responseBody: payload.responseBody,
+          durationMs: payload.durationMs,
           sourceIp: payload.sourceIp,
           destIp: payload.destIp,
           originService: sourceLabel,

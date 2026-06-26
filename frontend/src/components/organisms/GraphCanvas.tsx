@@ -49,19 +49,31 @@ const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, 
 
 const GraphCanvasComponent: React.FC<GraphCanvasProps> = ({ nodes, edges, onNodesChange, onEdgesChange, onNodeClick }) => {
   const { fitView } = useReactFlow();
+  const initialFitDoneRef = React.useRef(false);
 
-  // Auto fit view on node updates
+  // Auto fit view only once on first nodes arrival to avoid resetting user zoom/pan
   useEffect(() => {
-    if (nodes.length > 0) {
+    if (!initialFitDoneRef.current && nodes.length > 0) {
+      initialFitDoneRef.current = true;
       const timer = setTimeout(() => {
-        fitView({ padding: 0.15, duration: 600 });
+        try {
+          fitView({ padding: 0.15, duration: 600 });
+        } catch (e) {
+          // ignore
+        }
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [nodes, edges, fitView]);
+  }, [nodes, fitView]);
 
   // Memoize nodeTypes and edgeTypes to prevent React Flow infinite re-render warning
-  const nodeTypes: NodeTypes = useMemo(() => ({ pod: CustomPodNode }), []);
+  const nodeTypes: NodeTypes = useMemo(() => ({
+    pod: CustomPodNode,
+    service: CustomPodNode,
+    db: CustomPodNode,
+    custom: CustomPodNode,
+    default: CustomPodNode,
+  }), []);
   const edgeTypes: EdgeTypes = useMemo(() => ({ custom: CustomEdge }), []);
 
   return (
@@ -74,12 +86,11 @@ const GraphCanvasComponent: React.FC<GraphCanvasProps> = ({ nodes, edges, onNode
         onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        fitView
         className="bg-transparent"
         minZoom={0.1}
         maxZoom={1.5}
       >
-        <Background color="var(--outline-variant)" gap={24} size={1} />
+        <Background color="var(--color-on-surface-variant)" gap={24} size={1} />
         <Controls className="bg-surface-container-low border-white/10 fill-on-surface" />
       </ReactFlow>
     </div>

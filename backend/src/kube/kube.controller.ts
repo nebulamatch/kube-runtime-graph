@@ -25,6 +25,14 @@ export class KubeController {
     return this.kubeService.getPods(context, namespace);
   }
 
+  @Get('contexts/:context/namespaces/:namespace/services')
+  async getServices(
+    @Param('context') context: string,
+    @Param('namespace') namespace: string,
+  ) {
+    return this.kubeService.getServices(context, namespace);
+  }
+
   @Get('contexts/:context/namespaces/:namespace/events')
   async getEvents(
     @Param('context') context: string,
@@ -38,7 +46,7 @@ export class KubeController {
     @Param('context') _context: string,
     @Param('namespace') namespace: string,
   ) {
-    return ApiEventsStore.listByNamespace(namespace, 300);
+    return ApiEventsStore.listServiceTracesByNamespace(namespace, 300);
   }
 
   @Get('contexts/:context/namespaces/:namespace/rbac')

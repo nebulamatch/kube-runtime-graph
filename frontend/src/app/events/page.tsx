@@ -1,29 +1,24 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { DashboardLayout } from '../../components/templates/DashboardLayout';
 import { useKubeGlobal } from '../../context/KubeContext';
 import { Typography } from '../../components/atoms/Typography';
-import { StatusIndicator } from '../../components/atoms/StatusIndicator';
 import ErrorIcon from '@mui/icons-material/Error';
 import InfoIcon from '@mui/icons-material/Info';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import SearchIcon from '@mui/icons-material/Search';
+import FilterAltIcon from '@mui/icons-material/FilterAlt';
+import ApiIcon from '@mui/icons-material/Api';
 import { apiUrl } from '../../lib/backend';
 
 interface KubeEvent {
   id?: string;
-  name?: string;
   namespace: string;
-  reason?: string;
-  message?: string;
-  type?: string;
-  firstTimestamp?: string;
-  lastTimestamp?: string;
-  count?: number;
-  source?: string;
   method?: string;
   path?: string;
   url?: string;
+  endpoint?: string;
   headers?: Record<string, string>;
   statusCode?: number;
   responseBody?: string;
@@ -32,12 +27,45 @@ interface KubeEvent {
   destPort?: number;
   sourceService?: string;
   destService?: string;
+  sourcePod?: string;
+  destPod?: string;
+  durationMs?: number;
   timestamp?: string;
 }
+
+const isSystemServiceName = (name: string) => /^(kube-|coredns|konnectivity|metrics-server|prometheus|grafana|loki|kubernetes)$/i.test(name);
+const isNoiseEndpoint = (value: string) => /metrics|prometheus|telemetry|health|ready|status/i.test(value);
+
+const formatTime = (value?: string) => {
+  if (!value) return '--';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '--';
+  return d.toLocaleString();
+};
+
+const formatDuration = (value?: number) => {
+  if (value === undefined || value === null) return '—';
+  if (value < 1000) return `${value}ms`;
+  return `${(value / 1000).toFixed(2)}s`;
+};
+
+const statusBadge = (status?: number) => {
+  if (!status) return 'bg-surface-container text-outline border-white/10';
+  if (status >= 500) return 'bg-error/10 text-error border-error/20';
+  if (status >= 400) return 'bg-orange-500/10 text-orange-300 border-orange-500/20';
+  if (status >= 300) return 'bg-yellow-500/10 text-yellow-300 border-yellow-500/20';
+  return 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20';
+};
 
 export default function EventsPage() {
   const { selectedContext, selectedNamespace } = useKubeGlobal();
   const [events, setEvents] = useState<KubeEvent[]>([]);
+  const [allEvents, setAllEvents] = useState<KubeEvent[]>([]);
+  const [servicesList, setServicesList] = useState<string[]>([]);
+  const [servicesOnly, setServicesOnly] = useState<boolean>(true);
+  const [serviceFilter, setServiceFilter] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<KubeEvent | null>(null);
@@ -46,18 +74,26 @@ export default function EventsPage() {
     if (!selectedContext || !selectedNamespace) return;
     setLoading(true);
     setError(null);
+
     fetch(apiUrl(`/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/api-traces`))
       .then((res) => {
         if (!res.ok) throw new Error('Failed to fetch events');
         return res.json();
       })
       .then((data) => {
-        // Sort events by lastTimestamp descending
-        const sorted = (data || []).sort(
-          (a: KubeEvent, b: KubeEvent) =>
-            new Date(b.timestamp || b.lastTimestamp || 0).getTime() - new Date(a.timestamp || a.lastTimestamp || 0).getTime()
+        const sorted = (data || []).sort((a: KubeEvent, b: KubeEvent) =>
+          new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
         );
+
+        setAllEvents(sorted);
         setEvents(sorted);
+
+        const svcSet = new Set<string>();
+        sorted.forEach((evt: KubeEvent) => {
+          if (evt.sourceService && !isSystemServiceName(evt.sourceService)) svcSet.add(evt.sourceService);
+          if (evt.destService && !isSystemServiceName(evt.destService)) svcSet.add(evt.destService);
+        });
+        setServicesList(Array.from(svcSet).sort());
         setLoading(false);
       })
       .catch((err) => {
@@ -68,104 +104,276 @@ export default function EventsPage() {
   };
 
   useEffect(() => {
+    if (!selectedContext || !selectedNamespace) return;
+
     fetchEvents();
-    // Refresh every 30s to reduce backend pressure
-    const interval = setInterval(fetchEvents, 30000);
+
+    const svcUrl = apiUrl(`/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/services`);
+    fetch(svcUrl)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((svcs) => {
+        const names = (svcs || [])
+          .map((s: any) => s.name)
+          .filter(Boolean)
+          .filter((svc: string) => !isSystemServiceName(svc))
+          .sort();
+        setServicesList(names);
+      })
+      .catch(() => setServicesList([]));
+
+    const interval = setInterval(() => {
+      fetchEvents();
+      fetch(svcUrl)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((svcs) =>
+          setServicesList(
+            (svcs || [])
+              .map((s: any) => s.name)
+              .filter(Boolean)
+              .filter((svc: string) => !isSystemServiceName(svc))
+              .sort()
+          )
+        );
+    }, 30000);
+
     return () => clearInterval(interval);
   }, [selectedContext, selectedNamespace]);
 
+  useEffect(() => {
+    let filtered = allEvents.slice();
+
+    if (servicesOnly) {
+      filtered = filtered.filter((e) => {
+        const src = e.sourceService || '';
+        const dst = e.destService || '';
+        const endpoint = e.endpoint || e.url || e.path || '';
+        const matchesKnownService = servicesList.length === 0 || servicesList.includes(src) || servicesList.includes(dst);
+        const notSystemNoise = !isSystemServiceName(src) && !isSystemServiceName(dst);
+        const notMetricsCall = !isNoiseEndpoint(endpoint);
+        return matchesKnownService && notSystemNoise && notMetricsCall;
+      });
+    }
+
+    if (serviceFilter) {
+      filtered = filtered.filter((e) => e.destService === serviceFilter || e.sourceService === serviceFilter);
+    }
+
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter((e) => {
+        if (!e.statusCode) return false;
+        const bucket = Math.floor(e.statusCode / 100) * 100;
+        return String(bucket) === statusFilter;
+      });
+    }
+
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase();
+      filtered = filtered.filter((e) => {
+        const searchable = [
+          e.endpoint,
+          e.url,
+          e.path,
+          e.sourcePod,
+          e.destPod,
+          e.sourceService,
+          e.destService,
+          e.sourceIp,
+          e.destIp,
+          e.method,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return searchable.includes(q);
+      });
+    }
+
+    setEvents(filtered);
+  }, [allEvents, servicesOnly, serviceFilter, statusFilter, searchTerm, servicesList]);
+
+  const stats = useMemo(() => {
+    const total = events.length;
+    const success = events.filter((e) => (e.statusCode || 0) >= 200 && (e.statusCode || 0) < 300).length;
+    const errors = events.filter((e) => (e.statusCode || 0) >= 400).length;
+    const uniqueServices = new Set(
+      events.flatMap((e) => [e.sourceService, e.destService]).filter((s): s is string => !!s && !isSystemServiceName(s))
+    ).size;
+    const successRate = total > 0 ? Math.round((success / total) * 100) : 0;
+    return { total, successRate, errors, uniqueServices };
+  }, [events]);
+
   return (
     <DashboardLayout>
-      <div className="h-full flex flex-col p-6 overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+      <div className="h-full flex flex-col p-6 overflow-hidden bg-gradient-to-b from-surface to-surface-container-lowest">
+        <div className="flex items-center justify-between mb-5">
           <div>
-            <Typography variant="h1" className="text-2xl font-bold tracking-tight text-on-surface">
-              API Events
-            </Typography>
-            <Typography variant="body" className="text-on-surface-variant text-sm mt-1">
-              Real-time cluster activity for namespace <span className="text-primary font-medium">{selectedNamespace}</span>
+            <div className="flex items-center gap-2 mb-1">
+              <ApiIcon className="text-primary" fontSize="small" />
+              <Typography variant="h1" className="text-2xl font-bold tracking-tight text-on-surface">
+                API Events
+              </Typography>
+            </div>
+            <Typography variant="body" className="text-on-surface-variant text-sm">
+              Service-to-service calls in namespace <span className="text-primary font-medium">{selectedNamespace}</span>
             </Typography>
           </div>
-          <button 
+
+          <button
             onClick={fetchEvents}
-            className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high border border-white/5 text-on-surface text-sm transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high border border-white/8 text-on-surface text-sm transition-colors shadow-lg shadow-black/20"
           >
             <RefreshIcon fontSize="small" className={loading ? 'animate-spin text-primary' : 'text-outline'} />
             <span>Refresh</span>
           </button>
         </div>
 
-        {/* Content Panel */}
-        <div className="flex-1 glass-panel rounded-xl overflow-hidden flex flex-col">
+        <div className="grid grid-cols-4 gap-3 mb-5">
+          {[
+            { label: 'Total Calls', value: stats.total },
+            { label: 'Success Rate', value: `${stats.successRate}%` },
+            { label: 'Services Seen', value: stats.uniqueServices },
+            { label: 'Errors', value: stats.errors },
+          ].map((item) => (
+            <div key={item.label} className="rounded-2xl border border-white/6 bg-surface-container/60 px-4 py-3 shadow-lg shadow-black/10">
+              <div className="text-[11px] uppercase tracking-[0.24em] text-outline mb-1">{item.label}</div>
+              <div className="text-2xl font-semibold text-on-surface">{item.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-3 mb-4 rounded-2xl border border-white/6 bg-surface-container-low/75 px-4 py-3 backdrop-blur-sm">
+          <div className="flex items-center gap-2 text-on-surface-variant text-sm whitespace-nowrap">
+            <FilterAltIcon fontSize="small" />
+            <span>Filters</span>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-on-surface-variant whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={servicesOnly}
+              onChange={(e) => setServicesOnly(e.target.checked)}
+              className="h-4 w-4 rounded border-white/20 bg-surface-container"
+            />
+            Service calls only
+          </label>
+
+          <select
+            value={serviceFilter}
+            onChange={(e) => setServiceFilter(e.target.value)}
+            className="min-w-[180px] rounded-xl bg-surface-container px-3 py-2 text-sm text-on-surface outline-none border border-white/6"
+          >
+            <option value="">All services</option>
+            {servicesList.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="min-w-[120px] rounded-xl bg-surface-container px-3 py-2 text-sm text-on-surface outline-none border border-white/6"
+          >
+            <option value="all">All status</option>
+            <option value="200">2xx</option>
+            <option value="300">3xx</option>
+            <option value="400">4xx</option>
+            <option value="500">5xx</option>
+          </select>
+
+          <div className="relative flex-1">
+            <SearchIcon fontSize="small" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
+            <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search pod, service, endpoint, IP..."
+              className="w-full rounded-xl bg-surface-container px-10 py-2 text-sm text-on-surface outline-none border border-white/6"
+            />
+          </div>
+        </div>
+
+        <div className="flex-1 rounded-3xl overflow-hidden border border-white/6 bg-[#181a20] shadow-2xl shadow-black/30">
           {loading && events.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center space-y-3">
-              <div className="w-8 h-8 rounded-full border-2 border-primary-container border-t-transparent animate-spin" />
-              <Typography variant="body" className="text-outline">Loading API traces...</Typography>
+            <div className="h-full flex flex-col items-center justify-center gap-3 text-outline">
+              <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              <Typography variant="body">Loading API traces...</Typography>
             </div>
           ) : error ? (
-            <div className="flex-1 flex flex-col items-center justify-center space-y-2 text-error">
+            <div className="h-full flex flex-col items-center justify-center gap-3 text-error">
               <ErrorIcon fontSize="large" />
-              <Typography variant="body" className="text-on-surface-variant">{error}</Typography>
+              <Typography variant="body" className="text-on-surface-variant">
+                {error}
+              </Typography>
             </div>
           ) : events.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center space-y-2 text-outline">
+            <div className="h-full flex flex-col items-center justify-center gap-3 text-outline">
               <InfoIcon fontSize="large" />
-              <Typography variant="body">No API traces found in this namespace yet.</Typography>
+              <Typography variant="body">No service API traces found in this namespace yet.</Typography>
             </div>
           ) : (
-            <div className="flex-1 overflow-auto terminal-scroll">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-white/5 bg-surface-container-low/60 text-outline text-xs font-semibold uppercase tracking-wider">
-                    <th className="px-6 py-4">Type</th>
-                    <th className="px-6 py-4">Endpoint</th>
-                    <th className="px-6 py-4">Source</th>
-                    <th className="px-6 py-4">Destination</th>
-                    <th className="px-6 py-4 text-center">Status</th>
-                    <th className="px-6 py-4 text-center">Action</th>
-                    <th className="px-6 py-4 text-right">Last Seen</th>
+            <div className="h-full overflow-auto terminal-scroll">
+              <table className="w-full border-collapse text-left">
+                <thead className="sticky top-0 z-10">
+                  <tr className="bg-[#2b2f35] text-[#aeb4bd] text-[11px] uppercase tracking-[0.18em] border-b border-white/6">
+                    <th className="px-4 py-3">Timestamp</th>
+                    <th className="px-4 py-3">Source Pod</th>
+                    <th className="px-4 py-3">Destination Pod</th>
+                    <th className="px-4 py-3 text-center">Method</th>
+                    <th className="px-4 py-3">Path</th>
+                    <th className="px-4 py-3 text-center">Status Code</th>
+                    <th className="px-4 py-3 text-center">Duration</th>
+                    <th className="px-4 py-3 text-center">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5">
-                  {events.map((evt, idx) => {
-                    const statusCode = evt.statusCode || 0;
-                    const isWarning = statusCode >= 400;
-                    const endpoint = evt.url || evt.path || evt.message || '-';
-                    const typeLabel = evt.method || evt.type || 'TRACE';
+                <tbody>
+                  {events.map((evt) => {
+                    const endpoint = evt.endpoint || evt.url || evt.path || '-';
+                    const method = evt.method || 'TRACE';
+                    const status = evt.statusCode;
+                    const sourceLabel = evt.sourcePod || evt.sourceService || evt.sourceIp || '-';
+                    const destLabel = evt.destPod || evt.destService || evt.destIp || '-';
                     return (
-                      <tr key={idx} className="hover:bg-surface-container/20 transition-colors text-sm">
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                            isWarning 
-                              ? 'bg-error-container/20 text-error border border-error-container/40' 
-                              : 'bg-primary-container/10 text-primary-fixed border border-primary-container/20'
-                          }`}>
-                            {typeLabel}
+                      <tr key={evt.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                        <td className="px-4 py-3 text-[11px] text-[#b4bac4] whitespace-nowrap font-mono">{formatTime(evt.timestamp)}</td>
+                        <td className="px-4 py-3 min-w-[180px]">
+                          <div className="font-semibold text-on-surface text-sm truncate max-w-[220px]">{sourceLabel}</div>
+                          {evt.sourceService && evt.sourceService !== evt.sourcePod && (
+                            <div className="text-[11px] text-outline-variant">svc: {evt.sourceService}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 min-w-[180px]">
+                          <div className="font-semibold text-on-surface text-sm truncate max-w-[220px]">{destLabel}</div>
+                          {evt.destService && evt.destService !== evt.destPod && (
+                            <div className="text-[11px] text-outline-variant">svc: {evt.destService}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="inline-flex items-center rounded-md border border-[#f0b44c]/25 bg-[#f0b44c]/10 px-2.5 py-1 text-[11px] font-semibold text-[#f0b44c]">
+                            {method}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap font-medium text-on-surface">
-                          <span className="font-mono">{endpoint}</span>
+                        <td className="px-4 py-3 min-w-[280px]">
+                          <div className="font-mono text-sm text-on-surface truncate max-w-[420px]">{endpoint}</div>
+                          {evt.url && evt.url !== endpoint && (
+                            <div className="text-[11px] text-outline-variant truncate max-w-[420px]">{evt.url}</div>
+                          )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-outline">
-                          {evt.sourceService || evt.sourceIp || '-'}
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-flex items-center rounded-md border px-2.5 py-1 text-[11px] font-semibold ${statusBadge(status)}`}>
+                            {status ?? 'Unknown'}
+                          </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-outline">
-                          {evt.destService || evt.destIp || '-'}
+                        <td className="px-4 py-3 text-center text-sm text-on-surface-variant font-mono">
+                          {formatDuration(evt.durationMs)}
                         </td>
-                        <td className="px-6 py-4 text-center text-on-surface font-mono">
-                          {evt.statusCode ?? '-'}
-                        </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-4 py-3 text-center">
                           <button
                             onClick={() => setSelectedEvent(evt)}
-                            className="px-2 py-1 rounded border border-white/10 hover:bg-surface-container text-xs"
+                            className="rounded-md border border-white/10 px-3 py-1 text-[11px] text-on-surface hover:bg-white/5"
                           >
                             View
                           </button>
-                        </td>
-                        <td className="px-6 py-4 text-right whitespace-nowrap text-outline text-xs">
-                          {new Date(evt.timestamp || evt.lastTimestamp || Date.now()).toLocaleTimeString()}
                         </td>
                       </tr>
                     );
@@ -176,21 +384,68 @@ export default function EventsPage() {
           )}
         </div>
 
+        <div className="mt-3 flex items-center justify-between text-[11px] text-outline-variant">
+          <span>
+            Showing {events.length} of {allEvents.length} service API events
+          </span>
+          <span>Capture is namespace-scoped and service-filtered</span>
+        </div>
+
         {selectedEvent && (
-          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
-            <div className="w-full max-w-3xl glass-panel rounded-xl p-5 max-h-[80vh] overflow-auto">
-              <div className="flex items-center justify-between mb-4">
-                <Typography variant="h2" className="text-on-surface">API Trace Details</Typography>
-                <button
-                  onClick={() => setSelectedEvent(null)}
-                  className="px-2 py-1 rounded border border-white/10 hover:bg-surface-container text-xs"
-                >
-                  Close
-                </button>
+          <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex items-center justify-center p-6">
+            <div className="w-full max-w-4xl rounded-3xl border border-white/10 bg-[#12141a] shadow-2xl shadow-black/40 overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-white/8 bg-white/3">
+                <div>
+                  <Typography variant="h2" className="text-on-surface text-xl">
+                    API Event Details
+                  </Typography>
+                  <Typography variant="body" className="text-outline-variant text-sm mt-1">
+                    {selectedEvent.method || 'TRACE'} {selectedEvent.endpoint || selectedEvent.url || selectedEvent.path || '-'}
+                  </Typography>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => navigator.clipboard?.writeText(JSON.stringify(selectedEvent, null, 2))}
+                    className="rounded-lg border border-white/10 px-3 py-2 text-xs text-on-surface hover:bg-white/5"
+                  >
+                    Copy JSON
+                  </button>
+                  <button
+                    onClick={() => setSelectedEvent(null)}
+                    className="rounded-lg border border-white/10 px-3 py-2 text-xs text-on-surface hover:bg-white/5"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
-              <pre className="text-xs text-on-surface-variant whitespace-pre-wrap break-all">
+
+              <div className="grid grid-cols-2 gap-4 p-6">
+                <div className="rounded-2xl border border-white/8 bg-surface-container-low p-4">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Request</div>
+                  <div className="space-y-2 text-sm">
+                    <div><span className="text-outline-variant">Namespace:</span> <span className="text-on-surface">{selectedEvent.namespace}</span></div>
+                    <div><span className="text-outline-variant">Source Pod:</span> <span className="text-on-surface">{selectedEvent.sourcePod || selectedEvent.sourceService || selectedEvent.sourceIp || '-'}</span></div>
+                    <div><span className="text-outline-variant">Destination Pod:</span> <span className="text-on-surface">{selectedEvent.destPod || selectedEvent.destService || selectedEvent.destIp || '-'}</span></div>
+                    <div><span className="text-outline-variant">Endpoint:</span> <span className="text-on-surface font-mono">{selectedEvent.endpoint || selectedEvent.url || selectedEvent.path || '-'}</span></div>
+                    <div><span className="text-outline-variant">Status:</span> <span className="text-on-surface">{selectedEvent.statusCode ?? 'Unknown'}</span></div>
+                    <div><span className="text-outline-variant">Duration:</span> <span className="text-on-surface">{formatDuration(selectedEvent.durationMs)}</span></div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/8 bg-surface-container-low p-4">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Headers</div>
+                  <pre className="max-h-[260px] overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
+{JSON.stringify(selectedEvent.headers || {}, null, 2)}
+                  </pre>
+                </div>
+
+                <div className="col-span-2 rounded-2xl border border-white/8 bg-surface-container-low p-4">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Raw Event</div>
+                  <pre className="max-h-[300px] overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
 {JSON.stringify(selectedEvent, null, 2)}
-              </pre>
+                  </pre>
+                </div>
+              </div>
             </div>
           </div>
         )}

@@ -13,6 +13,7 @@ export interface TelemetryPayload {
   headers?: Record<string, string>;
   statusCode?: number;
   responseBody?: string;
+  durationMs?: number;
 }
 
 @Controller('api/telemetry')
@@ -60,7 +61,11 @@ export class TelemetryController {
       // Best-effort namespace attribution: use destination side when possible.
       const namespace = resultData?.destNamespace || resultData?.sourceNamespace || 'default';
 
-      if (payload.method || payload.path || payload.url || payload.headers || payload.statusCode) {
+      const endpoint = payload.url || (resultData?.edge?.data?.endpoint as string | undefined) || (payload.method && payload.path ? `${payload.method} ${payload.path}` : undefined);
+      const hasServiceContext = !!(sourceService || destService);
+      const hasTraceContext = !!(payload.method || payload.path || payload.url || payload.headers || payload.statusCode || endpoint);
+
+      if (hasServiceContext || hasTraceContext) {
         ApiEventsStore.add({
           id: `trace-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           timestamp: new Date().toISOString(),
@@ -68,9 +73,11 @@ export class TelemetryController {
           method: payload.method,
           path: payload.path,
           url: payload.url || payload.path,
+          endpoint,
           headers: payload.headers,
           statusCode: payload.statusCode,
           responseBody: payload.responseBody,
+          durationMs: payload.durationMs,
           sourceIp: payload.sourceIp,
           destIp: payload.destIp,
           destPort: payload.destPort,

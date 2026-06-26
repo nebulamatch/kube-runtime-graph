@@ -13,8 +13,10 @@ export class KubeService {
   // In-memory caches with TTL
   private eventCache: Map<string, CacheEntry<any[]>> = new Map();
   private podsCache: Map<string, CacheEntry<any[]>> = new Map();
+  private servicesCache: Map<string, CacheEntry<any[]>> = new Map();
   private readonly eventCacheTtlMs = 5000; // 5 seconds
   private readonly podsCacheTtlMs = 5000; // 5 seconds
+  private readonly servicesCacheTtlMs = 5000; // 5 seconds
   private loadConfig(contextName?: string): k8s.KubeConfig {
     const kc = new k8s.KubeConfig();
     if (process.env.KUBERNETES_SERVICE_HOST) {
@@ -88,7 +90,16 @@ export class KubeService {
         status: pod.status?.phase,
         namespace: pod.metadata?.namespace,
         ip: pod.status?.podIP,
+        nodeName: pod.spec?.nodeName,
+        restarts: Array.isArray(pod.status?.containerStatuses)
+          ? pod.status.containerStatuses.reduce((sum: number, container: any) => sum + (container.restartCount || 0), 0)
+          : 0,
+        readyContainers: Array.isArray(pod.status?.containerStatuses)
+          ? pod.status.containerStatuses.filter((container: any) => container.ready).length
+          : 0,
+        totalContainers: Array.isArray(pod.spec?.containers) ? pod.spec.containers.length : 0,
         labels: pod.metadata?.labels || {},
+        createdAt: pod.metadata?.creationTimestamp,
       }));
 
       this.podsCache.set(cacheKey, { ts: Date.now(), data: pods });
@@ -97,6 +108,36 @@ export class KubeService {
       console.error('Failed to list pods', error);
       throw new HttpException(
         `Failed to list pods: ${error?.message || JSON.stringify(error)}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async getServices(contextName: string, namespace: string) {
+    try {
+      const cacheKey = `${contextName}::${namespace}::services`;
+      const cached = this.servicesCache.get(cacheKey);
+      if (cached && Date.now() - cached.ts < this.servicesCacheTtlMs) {
+        return cached.data;
+      }
+
+      const kc = this.loadConfig(contextName);
+      const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
+      const res: any = await k8sApi.listNamespacedService(namespace);
+      const items = res.body ? res.body.items : res.items;
+      const services = items.map((s: any) => ({
+        name: s.metadata?.name,
+        namespace: s.metadata?.namespace,
+        type: s.spec?.type,
+        selector: s.spec?.selector || {},
+      }));
+
+      this.servicesCache.set(cacheKey, { ts: Date.now(), data: services });
+      return services;
+    } catch (error: any) {
+      console.error('Failed to list services', error);
+      throw new HttpException(
+        `Failed to list services: ${error?.message || JSON.stringify(error)}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DashboardLayout } from '../../components/templates/DashboardLayout';
 import { useKubeGlobal } from '../../context/KubeContext';
 import { Typography } from '../../components/atoms/Typography';
@@ -8,12 +8,35 @@ import { io } from 'socket.io-client';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import SearchIcon from '@mui/icons-material/Search';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import PauseIcon from '@mui/icons-material/Pause';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
+import ClearAllIcon from '@mui/icons-material/ClearAll';
+import CloseIcon from '@mui/icons-material/Close';
 import { apiUrl, socketUrl } from '../../lib/backend';
+import { LogsIcon } from 'lucide-react';
 
 interface Pod {
   name: string;
   status: string;
   namespace: string;
+  ip?: string;
+  nodeName?: string;
+  restarts?: number;
+  readyContainers?: number;
+  totalContainers?: number;
+  labels?: Record<string, string>;
+  createdAt?: string;
+}
+
+interface LogEntry {
+  id: string;
+  raw: string;
+  timestamp: string;
+  level: 'INFO' | 'WARN' | 'ERROR' | 'DEBUG' | 'TRACE' | 'SYSTEM';
+  text: string;
 }
 
 const stripAnsi = (str: string) => {
@@ -21,31 +44,55 @@ const stripAnsi = (str: string) => {
   return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
 };
 
+const inferLevel = (line: string): LogEntry['level'] => {
+  const l = line.toLowerCase();
+  if (/(\berror\b|fatal|panic|failed|exception|traceback)/i.test(line)) return 'ERROR';
+  if (/(\bwarn\b|warning|deprecated|latency|retrying)/i.test(line)) return 'WARN';
+  if (/(\bdebug\b|payload:|request id|x-request-id)/i.test(line)) return 'DEBUG';
+  if (/(\btrace\b|incoming|outgoing|http\s+(get|post|put|delete|patch))/i.test(line)) return 'TRACE';
+  if (/^\[system\]|connecting to logs stream/i.test(line)) return 'SYSTEM';
+  if (/(\binfo\b|started|ready|success|registered|listening)/i.test(line) || l.startsWith('20')) return 'INFO';
+  return 'INFO';
+};
+
+const severityOrder: Record<string, number> = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4, SYSTEM: 5 };
+
+const levelStyles: Record<LogEntry['level'], { pill: string; border: string; text: string }> = {
+  ERROR: { pill: 'bg-error/10 text-error border-error/20', border: 'border-error/20', text: 'text-error' },
+  WARN: { pill: 'bg-orange-500/10 text-orange-300 border-orange-500/20', border: 'border-orange-500/20', text: 'text-orange-300' },
+  INFO: { pill: 'bg-primary/10 text-primary-fixed border-primary/20', border: 'border-primary/20', text: 'text-primary-fixed' },
+  DEBUG: { pill: 'bg-sky-500/10 text-sky-300 border-sky-500/20', border: 'border-sky-500/20', text: 'text-sky-300' },
+  TRACE: { pill: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20', border: 'border-emerald-500/20', text: 'text-emerald-300' },
+  SYSTEM: { pill: 'bg-surface-container text-outline border-white/10', border: 'border-white/8', text: 'text-outline' },
+};
+
 export default function LogsPage() {
   const { selectedContext, selectedNamespace } = useKubeGlobal();
   const [pods, setPods] = useState<Pod[]>([]);
   const [selectedPod, setSelectedPod] = useState<string>('');
-  const [logs, setLogs] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [podSearch, setPodSearch] = useState('');
+  const [logSearch, setLogSearch] = useState('');
+  const [selectedLevels, setSelectedLevels] = useState<string[]>(['INFO', 'WARN', 'ERROR']);
   const [socket, setSocket] = useState<any>(null);
   const [loadingPods, setLoadingPods] = useState(false);
   const [isLive, setIsLive] = useState(true);
-
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [showContext, setShowContext] = useState(true);
+  const [endpointFilter, setEndpointFilter] = useState('');
+  const [timeRangeMinutes, setTimeRangeMinutes] = useState(5);
+  const [markedTimestamp, setMarkedTimestamp] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  // Fetch pods in current namespace
   useEffect(() => {
     if (!selectedContext || !selectedNamespace) return;
     setLoadingPods(true);
     fetch(apiUrl(`/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/pods`))
       .then((res) => res.json())
       .then((data) => {
-        setPods(data || []);
-        if (data && data.length > 0) {
-          setSelectedPod(data[0].name);
-        } else {
-          setSelectedPod('');
-        }
+        const sorted = (data || []).sort((a: Pod, b: Pod) => a.name.localeCompare(b.name));
+        setPods(sorted);
+        setSelectedPod((current) => current || sorted[0]?.name || '');
         setLoadingPods(false);
       })
       .catch((err) => {
@@ -54,7 +101,6 @@ export default function LogsPage() {
       });
   }, [selectedContext, selectedNamespace]);
 
-  // Connect WebSockets
   useEffect(() => {
     const newSocket = io(socketUrl);
     setSocket(newSocket);
@@ -64,10 +110,19 @@ export default function LogsPage() {
     });
 
     newSocket.on('logUpdate', (logLine: string) => {
-      if (isLive) {
-        const cleanLine = stripAnsi(logLine);
-        setLogs((prev) => [...prev, cleanLine].slice(-500)); // Limit cache size
-      }
+      if (!isLive) return;
+      const cleanLine = stripAnsi(logLine).trimEnd();
+      if (!cleanLine) return;
+
+      const entry: LogEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        raw: cleanLine,
+        timestamp: new Date().toISOString(),
+        level: inferLevel(cleanLine),
+        text: cleanLine,
+      };
+
+      setEntries((prev) => [...prev, entry].slice(-800));
     });
 
     return () => {
@@ -75,14 +130,21 @@ export default function LogsPage() {
     };
   }, [isLive]);
 
-  // Stream logs when selectedPod changes
   useEffect(() => {
     if (!socket || !selectedPod || !selectedContext || !selectedNamespace) {
-      setLogs([]);
+      setEntries([]);
       return;
     }
 
-    setLogs([`[System] Connecting to logs stream for ${selectedPod}...`]);
+    setEntries([
+      {
+        id: 'system-start',
+        raw: `[System] Connecting to logs stream for ${selectedPod}...`,
+        timestamp: new Date().toISOString(),
+        level: 'SYSTEM',
+        text: `[System] Connecting to logs stream for ${selectedPod}...`,
+      },
+    ]);
 
     socket.emit('subscribeLogs', {
       context: selectedContext,
@@ -95,119 +157,392 @@ export default function LogsPage() {
     };
   }, [socket, selectedPod, selectedContext, selectedNamespace]);
 
-  // Scroll to bottom
   useEffect(() => {
-    if (logsEndRef.current) {
+    if (autoScroll && logsEndRef.current) {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [logs]);
+  }, [entries, autoScroll]);
 
-  const filteredLogs = logs.filter((line) =>
-    line.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredPods = useMemo(() => {
+    const q = podSearch.toLowerCase();
+    return pods.filter((pod) => pod.name.toLowerCase().includes(q) || (pod.labels && Object.values(pod.labels).join(' ').toLowerCase().includes(q)));
+  }, [pods, podSearch]);
+
+  const visibleEntries = useMemo(() => {
+    let filtered = entries
+      .filter((entry) => selectedLevels.includes(entry.level))
+      .filter((entry) => !logSearch || entry.text.toLowerCase().includes(logSearch.toLowerCase()));
+
+    if (endpointFilter && markedTimestamp) {
+      const markedTime = new Date(markedTimestamp).getTime();
+      const rangeMs = timeRangeMinutes * 60 * 1000;
+      filtered = filtered.filter((entry) => {
+        const entryTime = new Date(entry.timestamp).getTime();
+        return Math.abs(entryTime - markedTime) <= rangeMs;
+      });
+    } else if (endpointFilter) {
+      filtered = filtered.filter((entry) => entry.text.toLowerCase().includes(endpointFilter.toLowerCase()));
+    }
+
+    return filtered;
+  }, [entries, logSearch, selectedLevels, endpointFilter, markedTimestamp, timeRangeMinutes]);
+
+  const selectedPodDetails = pods.find((p) => p.name === selectedPod);
+
+  const handleMarkEndpoint = (timestamp: string) => {
+    setMarkedTimestamp(timestamp);
+    setEndpointFilter('');
+  };
+
+  const toggleLevel = (level: string) => {
+    setSelectedLevels((prev) => (prev.includes(level) ? prev.filter((l) => l !== level) : [...prev, level]));
+  };
+
+  const copyLogs = async () => {
+    try {
+      await navigator.clipboard.writeText(visibleEntries.map((e) => e.raw).join('\n'));
+    } catch {
+      // ignore
+    }
+  };
+
+  const clearLogs = () => setEntries([]);
+
+  const downloadLogs = () => {
+    const blob = new Blob([visibleEntries.map((e) => e.raw).join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${selectedPod || 'logs'}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <DashboardLayout>
-      <div className="h-full flex p-6 space-x-6 overflow-hidden">
-        {/* Sidebar Pod Selector */}
-        <div className="w-[300px] glass-panel rounded-xl p-4 flex flex-col h-full">
-          <Typography variant="h3" className="text-sm font-semibold mb-4 text-outline-variant uppercase tracking-wider">
-            Pods ({pods.length})
-          </Typography>
-          {loadingPods ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : pods.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-outline space-y-2 text-center p-4">
-              <InfoOutlinedIcon fontSize="small" />
-              <Typography variant="body" className="text-xs">No pods found in namespace.</Typography>
-            </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto space-y-1 pr-1 terminal-scroll">
-              {pods.map((pod) => (
-                <button
-                  key={pod.name}
-                  onClick={() => setSelectedPod(pod.name)}
-                  className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all flex items-center justify-between border ${
-                    selectedPod === pod.name
-                      ? 'bg-primary/10 border-primary/30 text-primary-fixed font-medium'
-                      : 'border-transparent text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
-                  }`}
-                >
-                  <span className="truncate mr-2">{pod.name}</span>
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    pod.status === 'Running' ? 'bg-accent-green' : 'bg-tertiary-container'
-                  }`} />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Terminal Logger */}
-        <div className="flex-1 flex flex-col h-full glass-panel rounded-xl overflow-hidden border border-white/5 bg-surface-container-lowest">
-          {/* Toolbar */}
-          <div className="border-b border-white/5 bg-surface-container-low/60 px-4 py-3 flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center space-x-3">
+      <div className="h-full flex flex-col p-6 overflow-hidden bg-gradient-to-b from-surface to-surface-container-lowest">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4 shrink-0">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
               <TerminalIcon className="text-primary" fontSize="small" />
-              <Typography variant="h3" className="text-sm font-medium text-on-surface">
-                {selectedPod ? `Logs: ${selectedPod}` : 'Log Console'}
+              <Typography variant="h1" className="text-2xl font-bold tracking-tight text-on-surface">
+                Log Management
               </Typography>
             </div>
-            
-            <div className="flex items-center space-x-4">
-              {/* Search Bar */}
+            <Typography variant="body" className="text-on-surface-variant text-sm">
+              Pods and live logs in namespace <span className="text-primary font-medium">{selectedNamespace || 'default'}</span>
+            </Typography>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setIsLive((v) => !v)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs border ${isLive ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : 'border-white/8 bg-surface-container-low text-outline'
+                }`}
+            >
+              {isLive ? <PlayArrowIcon fontSize="small" /> : <PauseIcon fontSize="small" />}
+              {isLive ? 'LIVE' : 'PAUSED'}
+            </button>
+
+            <button
+              onClick={() => setAutoScroll((v) => !v)}
+              className={`px-4 py-2 rounded-xl text-xs border ${autoScroll ? 'border-primary/25 bg-primary/10 text-primary-fixed' : 'border-white/8 bg-surface-container-low text-outline'
+                }`}
+            >
+              Auto-scroll: {autoScroll ? 'ON' : 'OFF'}
+            </button>
+
+            <button
+              onClick={() => setShowContext((v) => !v)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs border ${showContext ? 'border-primary/25 bg-primary/10 text-primary-fixed' : 'border-white/8 bg-surface-container-low text-outline'
+                }`}
+            >
+              {showContext ? <CloseIcon fontSize="small" /> : <InfoOutlinedIcon fontSize="small" />}
+              {showContext ? 'Hide' : 'Show'} Context
+            </button>
+
+            <button onClick={copyLogs} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs border border-white/8 bg-surface-container-low text-on-surface hover:bg-white/5">
+              <ContentCopyIcon fontSize="small" /> Copy
+            </button>
+            <button onClick={downloadLogs} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs border border-white/8 bg-surface-container-low text-on-surface hover:bg-white/5">
+              <CloudDownloadIcon fontSize="small" /> Download
+            </button>
+            <button onClick={clearLogs} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs border border-white/8 bg-surface-container-low text-on-surface hover:bg-white/5">
+              <ClearAllIcon fontSize="small" /> Clear
+            </button>
+            <button onClick={() => setEntries([])} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs border border-white/8 bg-surface-container-low text-on-surface hover:bg-white/5">
+              <RefreshIcon fontSize="small" /> Reset
+            </button>
+          </div>
+        </div>
+
+        {/* Advanced Filters */}
+        <div className="mb-4 rounded-2xl border border-white/6 bg-surface-container-low/50 px-4 py-3 backdrop-blur-sm shrink-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-xs uppercase tracking-[0.16em] text-outline-variant whitespace-nowrap">Endpoint</label>
               <div className="relative">
-                <SearchIcon fontSize="small" className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-outline" />
+                <SearchIcon fontSize="small" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
                 <input
                   type="text"
-                  placeholder="Filter logs..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-surface-container-lowest border border-white/5 rounded-md pl-8 pr-3 py-1 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary w-[160px] transition-all"
+                  value={endpointFilter}
+                  onChange={(e) => {
+                    setEndpointFilter(e.target.value);
+                    if (!e.target.value) setMarkedTimestamp(null);
+                  }}
+                  placeholder="e.g., /api/payment"
+                  className="rounded-xl bg-surface-container px-9 py-1.5 text-sm text-on-surface outline-none border border-white/6 w-[200px]"
                 />
               </div>
-
-              {/* Live Indicator */}
-              <button 
-                onClick={() => setIsLive(!isLive)}
-                className={`flex items-center space-x-1.5 px-2 py-1 rounded text-xs transition-colors ${
-                  isLive 
-                    ? 'bg-accent-green/10 text-accent-green border border-accent-green/20' 
-                    : 'bg-surface-container hover:bg-surface-container-high border border-white/5 text-outline'
-                }`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-accent-green animate-pulse' : 'bg-outline'}`} />
-                <span>{isLive ? 'LIVE' : 'PAUSED'}</span>
-              </button>
-
-              <button
-                onClick={() => setLogs([])}
-                className="text-xs text-outline hover:text-on-surface transition-colors"
-              >
-                Clear
-              </button>
             </div>
-          </div>
 
-          {/* Code/Logs Output */}
-          <div className="flex-1 p-4 font-mono text-xs overflow-y-auto terminal-scroll bg-surface-container-lowest/80 text-on-surface-variant flex flex-col space-y-1 leading-relaxed">
-            {filteredLogs.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-outline">
-                No logs matching filter / wait for stream
+            {markedTimestamp && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs uppercase tracking-[0.16em] text-outline-variant whitespace-nowrap">Range</label>
+                <select
+                  value={timeRangeMinutes}
+                  onChange={(e) => setTimeRangeMinutes(Number(e.target.value))}
+                  className="rounded-xl bg-surface-container px-3 py-1.5 text-sm text-on-surface outline-none border border-white/6"
+                >
+                  <option value="1">1 min</option>
+                  <option value="5">5 min</option>
+                  <option value="10">10 min</option>
+                  <option value="15">15 min</option>
+                  <option value="30">30 min</option>
+                </select>
+                <button
+                  onClick={() => {
+                    setMarkedTimestamp(null);
+                    setEndpointFilter('');
+                  }}
+                  className="px-3 py-1.5 rounded-xl text-xs border border-white/8 bg-error/10 text-error hover:bg-error/20"
+                >
+                  Clear Range
+                </button>
               </div>
-            ) : (
-              filteredLogs.map((line, idx) => (
-                <div key={idx} className="whitespace-pre-wrap select-text break-all">
-                  {line}
-                </div>
-              ))
             )}
-            <div ref={logsEndRef} />
+
+            {markedTimestamp && (
+              <div className="ml-auto flex items-center gap-2 px-3 py-1.5 rounded-xl border border-primary/25 bg-primary/10 text-xs text-primary-fixed">
+                <span>📍 Searching around {new Date(markedTimestamp).toLocaleTimeString()}</span>
+              </div>
+            )}
           </div>
+        </div>
+
+        <div className={`flex-1 min-h-0 grid gap-4 ${showContext ? 'grid-cols-[280px_minmax(0,1fr)_320px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
+          <aside className="min-h-0 rounded-3xl border border-white/6 bg-[#12151b] shadow-2xl shadow-black/20 flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-white/8 bg-white/3">
+              <Typography variant="h3" className="text-sm uppercase tracking-[0.22em] text-outline-variant mb-3">
+                Log Sources
+              </Typography>
+              <div className="relative">
+                <SearchIcon fontSize="small" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
+                <input
+                  value={podSearch}
+                  onChange={(e) => setPodSearch(e.target.value)}
+                  placeholder="Search pods..."
+                  className="w-full rounded-2xl bg-surface-container-lowest border border-white/8 pl-10 pr-3 py-2 text-sm text-on-surface outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto terminal-scroll p-3 space-y-2">
+              {loadingPods ? (
+                <div className="flex h-full items-center justify-center">
+                  <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : filteredPods.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center text-outline gap-2 text-center p-6">
+                  <InfoOutlinedIcon fontSize="small" />
+                  <Typography variant="body" className="text-xs">No pods found in this namespace.</Typography>
+                </div>
+              ) : (
+                filteredPods.map((pod) => {
+                  const ready = pod.status === 'Running';
+                  const isSelected = selectedPod === pod.name;
+                  return (
+                    <button
+                      key={pod.name}
+                      onClick={() => setSelectedPod(pod.name)}
+                      className={`w-full text-left rounded-2xl border px-3 py-3 transition-all ${isSelected
+                        ? 'border-primary/30 bg-primary/10 shadow-[0_0_0_1px_rgba(173,198,255,0.08)]'
+                        : 'border-white/5 bg-surface-container-lowest/40 hover:bg-white/5'
+                        }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm text-on-surface truncate">{pod.name}</div>
+                          <div className="text-[11px] text-outline-variant mt-1">{pod.namespace}</div>
+                        </div>
+                        <span className={`w-2.5 h-2.5 rounded-full ${ready ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-[11px] text-outline-variant">
+                        <span>{pod.status}</span>
+                        <span>{pod.readyContainers ?? 0}/{pod.totalContainers ?? 0}</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </aside>
+
+          <section className="min-h-0 rounded-3xl border border-white/6 bg-[#0f1217] shadow-2xl shadow-black/20 overflow-hidden flex flex-col">
+            <div className="border-b border-white/8 bg-[#12151b] px-5 py-3 flex flex-wrap items-center gap-3 shrink-0">
+              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-outline-variant">
+                Severity
+              </div>
+              {(['INFO', 'WARN', 'ERROR', 'DEBUG', 'TRACE', 'SYSTEM'] as const).map((level) => (
+                <button
+                  key={level}
+                  onClick={() => toggleLevel(level)}
+                  className={`rounded-xl border px-3 py-2 text-[11px] font-semibold tracking-wide ${selectedLevels.includes(level) ? levelStyles[level].pill : 'border-white/8 bg-transparent text-outline-variant'
+                    }`}
+                >
+                  {level}
+                </button>
+              ))}
+
+              <div className="relative flex-1 min-w-[220px] ml-auto">
+                <SearchIcon fontSize="small" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
+                <input
+                  value={logSearch}
+                  onChange={(e) => setLogSearch(e.target.value)}
+                  placeholder="Filter with Regex..."
+                  className="w-full rounded-xl bg-surface-container-lowest border border-white/8 pl-10 pr-3 py-2 text-sm text-on-surface outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 flex flex-col">
+              <div className="px-5 py-2 border-b border-white/8 bg-[#11151a] flex items-center justify-between shrink-0">
+                <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant">Stream</div>
+                <div className="text-[11px] text-outline-variant">Showing {visibleEntries.length} entries</div>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto terminal-scroll bg-[#0d1014] px-5 py-4 overscroll-contain">
+                {visibleEntries.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-outline text-sm">
+                    No logs matching filter / wait for stream
+                  </div>
+                ) : (
+                  <div className="space-y-2 font-mono text-[12px] leading-relaxed">
+                    {visibleEntries.map((entry) => {
+                      const style = levelStyles[entry.level];
+                      const isMarked = markedTimestamp === entry.timestamp;
+                      return (
+                        <div key={entry.id} className={`rounded-2xl border ${style.border} px-4 py-3 ${isMarked ? 'bg-primary/15 border-primary/40' : 'bg-white/3'}`}>
+                          <div className="flex items-center justify-between gap-3 mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold ${style.pill}`}>
+                                {entry.level}
+                              </span>
+                              <span className="text-[11px] text-outline-variant">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                            </div>
+                            <button
+                              onClick={() => handleMarkEndpoint(entry.timestamp)}
+                              className={`px-2 py-0.5 rounded-md text-[10px] border transition-colors ${isMarked ? 'border-primary/40 bg-primary/10 text-primary-fixed' : 'border-white/8 bg-white/3 text-outline-variant hover:bg-white/5'}`}
+                              title="Mark this timestamp to search nearby logs"
+                            >
+                              📍
+                            </button>
+                          </div>
+                          <div className="whitespace-pre-wrap break-all text-on-surface">{entry.text}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div ref={logsEndRef} />
+              </div>
+
+              <div className="px-5 py-3 border-t border-white/8 bg-[#11151a] flex items-center justify-between text-[11px] text-outline-variant shrink-0">
+                <span>{isLive ? 'Streaming logs' : 'Paused'}</span>
+                <span>{selectedPod || 'No pod selected'}</span>
+              </div>
+            </div>
+          </section>
+
+          {showContext && (
+            <aside className="min-h-0 rounded-3xl border border-white/6 bg-[#101419] shadow-2xl shadow-black/20 flex flex-col overflow-y-auto terminal-scroll overscroll-contain">
+              <div className="p-5 border-b border-white/8 shrink-0">
+                <Typography variant="h3" className="text-xs uppercase tracking-[0.24em] text-outline-variant mb-3">
+                  Pod Context
+                </Typography>
+                <div className="rounded-3xl overflow-hidden border border-white/8 bg-surface-container-lowest">
+                  <div className="h-28 bg-[radial-gradient(circle_at_center,rgba(173,198,255,0.18),rgba(16,20,25,0.9))] flex items-center justify-center">
+                    <div className="w-20 h-20 rounded-2xl bg-[#0f141b] border border-white/10 flex items-center justify-center text-primary shadow-[0_0_30px_rgba(173,198,255,0.12)]">
+                      <TerminalIcon fontSize="large" />
+                    </div>
+                  </div>
+                  <div className="p-4 space-y-4">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-outline-variant mb-2">Identity</div>
+                      <div className="text-lg font-semibold text-on-surface break-words">{selectedPodDetails?.name || selectedPod || 'No pod selected'}</div>
+                      <div className="text-xs text-outline-variant mt-1">{selectedPodDetails?.status || 'Unknown'} • {selectedPodDetails?.namespace || selectedNamespace || 'default'}</div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="rounded-2xl border border-white/8 bg-white/3 p-3">
+                        <div className="text-outline-variant mb-1 uppercase tracking-[0.16em] text-[10px]">IP Address</div>
+                        <div className="text-on-surface font-semibold break-all">{selectedPodDetails?.ip || '—'}</div>
+                      </div>
+                      <div className="rounded-2xl border border-white/8 bg-white/3 p-3">
+                        <div className="text-outline-variant mb-1 uppercase tracking-[0.16em] text-[10px]">Restarts</div>
+                        <div className="text-on-surface font-semibold">{selectedPodDetails?.restarts ?? 0}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="rounded-2xl border border-white/8 bg-white/3 p-3">
+                        <div className="text-outline-variant mb-1 uppercase tracking-[0.16em] text-[10px]">Node</div>
+                        <div className="text-on-surface font-semibold break-words">{selectedPodDetails?.nodeName || '—'}</div>
+                      </div>
+                      <div className="rounded-2xl border border-white/8 bg-white/3 p-3">
+                        <div className="text-outline-variant mb-1 uppercase tracking-[0.16em] text-[10px]">Ready</div>
+                        <div className="text-on-surface font-semibold">{selectedPodDetails?.readyContainers ?? 0}/{selectedPodDetails?.totalContainers ?? 0}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5 border-b border-white/8 shrink-0">
+                <Typography variant="h3" className="text-xs uppercase tracking-[0.24em] text-outline-variant mb-3">
+                  Labels
+                </Typography>
+                <div className="flex flex-wrap gap-2">
+                  {selectedPodDetails?.labels && Object.keys(selectedPodDetails.labels).length > 0 ? (
+                    Object.entries(selectedPodDetails.labels).map(([key, value]) => (
+                      <span key={key} className="rounded-full border border-white/8 bg-white/4 px-3 py-1 text-[11px] text-outline-variant">
+                        {key}: {value}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-sm text-outline-variant">No labels found</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-5">
+                <Typography variant="h3" className="text-xs uppercase tracking-[0.24em] text-outline-variant mb-3">
+                  Log Tips
+                </Typography>
+                <div className="space-y-2 text-sm text-outline-variant">
+                  <div className="rounded-2xl border border-white/8 bg-white/3 p-3">Use the severity chips to isolate errors or warnings.</div>
+                  <div className="rounded-2xl border border-white/8 bg-white/3 p-3">Search matches the raw log text for fast triage.</div>
+                  <div className="rounded-2xl border border-white/8 bg-white/3 p-3">Pause live streaming before copying or downloading large output.</div>
+                </div>
+              </div>
+            </aside>
+          )}
+
         </div>
       </div>
     </DashboardLayout>
   );
 }
+
+
