@@ -554,7 +554,7 @@ export class GraphService {
         // If upstream differs from the immediate source, create a synthetic external node
         if (upstream && upstream !== payload.sourceIp) {
           const extId = `ext-${sanitizeId(upstream)}`;
-          if (!this.graphCacheHasNode(extId)) {
+          if (!this.discoveredDbs.has(extId)) {
             const extNode: Node = {
               id: extId,
               type: 'custom',
