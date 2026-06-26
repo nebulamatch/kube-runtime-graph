@@ -38,6 +38,8 @@ export class GraphService {
   private discoveredDbs: Map<string, Node> = new Map(); // dbNodeId -> Node
   private activeEdges: Map<string, Edge> = new Map(); // EdgeId -> Edge
   private serviceCallGraph: Map<string, Set<string>> = new Map(); // svcId -> Set of target svcIds
+  // Trace grouping map: traceId -> last seen nodeId in the trace chain
+  private traceLastNode: Map<string, string> = new Map();
   private lastResolveAt = 0;
   private lastResolveErrorAt = 0;
 
@@ -470,6 +472,7 @@ export class GraphService {
     path?: string;
     url?: string;
     headers?: Record<string, string>;
+    responseHeaders?: Record<string, string>;
     statusCode?: number;
     responseBody?: string;
     durationMs?: number;
@@ -536,6 +539,78 @@ export class GraphService {
         topologyChanged = targets.size > before;
       }
 
+      // Helper: sanitize label parts to safe node ids
+      const sanitizeId = (s?: string) => {
+        if (!s) return '';
+        return String(s).replace(/[^a-zA-Z0-9-_:.]/g, '_').slice(0, 120);
+      };
+
+      const syntheticNewNodes: Node[] = [];
+
+      // If upstream forwarded-for header exists and indicates an external origin
+      const forwardedFor = (payload.headers && (payload.headers['x-forwarded-for'] || payload.headers['x-forwarded-host'])) as string | undefined;
+      if (forwardedFor) {
+        const upstream = String(forwardedFor).split(',')[0].trim();
+        // If upstream differs from the immediate source, create a synthetic external node
+        if (upstream && upstream !== payload.sourceIp) {
+          const extId = `ext-${sanitizeId(upstream)}`;
+          if (!this.graphCacheHasNode(extId)) {
+            const extNode: Node = {
+              id: extId,
+              type: 'custom',
+              position: { x: Math.random() * 800, y: Math.random() * 200 },
+              data: {
+                label: upstream,
+                type: 'external',
+                rps: 0,
+                latency: '0ms',
+                errorRate: 0,
+              },
+            };
+            this.discoveredDbs.set(extId, extNode); // reuse discoveredDbs map for lightweight synthetic nodes
+            syntheticNewNodes.push(extNode);
+          }
+
+          // Create an active edge from external origin -> sourceNodeId (if sourceNodeId exists)
+          if (sourceNodeId) {
+            const syntheticEdgeId = `t-${extId}-${sourceNodeId}-fwd`;
+            if (!this.activeEdges.has(syntheticEdgeId)) {
+              const synthEdge: Edge = {
+                id: syntheticEdgeId,
+                source: extId,
+                target: sourceNodeId,
+                animated: false,
+                style: { stroke: '#64748b', strokeDasharray: '4 2' },
+              };
+              this.activeEdges.set(syntheticEdgeId, synthEdge);
+            }
+          }
+        }
+      }
+
+      // Trace-based chaining: if request contains a trace id we can stitch previous node -> this source
+      const traceIdHeader = (payload.headers && (payload.headers['traceparent'] || payload.headers['x-request-id'])) as string | undefined;
+      if (traceIdHeader) {
+        const traceId = String(traceIdHeader).split(',')[0].trim();
+        const prev = this.traceLastNode.get(traceId);
+        // If we have a previous node and it's different from current source, link prev -> source
+        if (prev && prev !== sourceNodeId && sourceNodeId) {
+          const chainEdgeId = `trace-${traceId}-${prev}-${sourceNodeId}`;
+          if (!this.activeEdges.has(chainEdgeId)) {
+            const chainEdge: Edge = {
+              id: chainEdgeId,
+              source: prev,
+              target: sourceNodeId,
+              animated: true,
+              style: { stroke: '#60a5fa', strokeWidth: 2 },
+            };
+            this.activeEdges.set(chainEdgeId, chainEdge);
+          }
+        }
+        // After processing this telemetry, set last seen to the destination so next hop can be chained
+        if (destNodeId) this.traceLastNode.set(traceId, destNodeId);
+      }
+
       const edge = {
         id: `t-${sourceNodeId}-${destNodeId}-${payload.destPort}`,
         source: sourceNodeId,
@@ -551,6 +626,7 @@ export class GraphService {
           path: payload.path,
           url: payload.url,
           headers: payload.headers,
+          responseHeaders: payload.responseHeaders,
           statusCode: payload.statusCode,
           responseBody: payload.responseBody,
           durationMs: payload.durationMs,
@@ -562,7 +638,10 @@ export class GraphService {
           destPod: destPodId?.replace('pod-', ''),
           originService: sourceLabel,
           originType: sourceServiceId ? 'service' : sourcePodId ? 'pod' : 'unknown',
-          requestOrigin: sourcePodId?.replace('pod-', '') || sourceServiceId?.replace('svc-', '') || sourceLabel,
+          // Prefer explicit forwarding headers to detect upstream client/origin (e.g. CDN, ingress)
+          requestOrigin: (payload.headers && (payload.headers['x-forwarded-for'] || payload.headers['x-forwarded-host']))
+            ? (String(payload.headers['x-forwarded-for'] || payload.headers['x-forwarded-host']).split(',')[0].trim())
+            : (sourcePodId?.replace('pod-', '') || sourceServiceId?.replace('svc-', '') || sourceLabel),
           timestamp: new Date().toISOString(),
         }
       };

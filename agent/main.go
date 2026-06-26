@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+    "strconv"
 	"syscall"
 	"unsafe"
 
@@ -35,6 +36,7 @@ type TelemetryPayload struct {
 	Path         string            `json:"path,omitempty"`
 	URL          string            `json:"url,omitempty"`
 	Headers      map[string]string `json:"headers,omitempty"`
+	ResponseHeaders map[string]string `json:"responseHeaders,omitempty"`
 	StatusCode   int               `json:"statusCode,omitempty"`
 	ResponseBody string            `json:"responseBody,omitempty"`
 }
@@ -165,7 +167,33 @@ func main() {
 		dport := (event.Dport >> 8) | (event.Dport << 8)
 
 		rawPayload := string(bytes.Trim(event.Payload[:], "\x00"))
-		method, path, fullURL, parsedHeaders := parseHTTPRequest(rawPayload)
+		method, path, fullURL, parsedHeaders, isResponse, respStatus, respHeaders, respBody := parseHTTPMessage(rawPayload)
+		// If this is a response packet, emit telemetry containing status and response headers
+		if isResponse {
+			// Prevent infinite loop by ignoring our own telemetry responses
+			if strings.Contains(fullURL, "/api/telemetry") {
+				continue
+			}
+
+			// Ignore cloud metadata spam
+			if dstIp.String() == "169.254.169.254" || dstIp.String() == "168.63.129.16" {
+				continue
+			}
+
+			log.Printf("HTTP Response Intercept: %s -> %s:%d status=%d", srcIp, dstIp, dport, respStatus)
+
+			payload := TelemetryPayload{
+				SourceIp: srcIp.String(),
+				DestIp:   dstIp.String(),
+				DestPort: dport,
+				StatusCode: respStatus,
+				ResponseHeaders: respHeaders,
+				ResponseBody: respBody,
+			}
+			go sendTelemetry(backendUrl, payload)
+			continue
+		}
+
 		if method == "" || path == "" {
 			continue
 		}
@@ -195,23 +223,75 @@ func main() {
 	}
 }
 
-func parseHTTPRequest(raw string) (method string, path string, fullURL string, headers map[string]string) {
+func parseHTTPMessage(raw string) (method string, path string, fullURL string, headers map[string]string, isResponse bool, respStatus int, respHeaders map[string]string, respBody string) {
 	raw = strings.ReplaceAll(raw, "\r\n", "\n")
 	lines := strings.Split(raw, "\n")
 	if len(lines) == 0 {
-		return "", "", "", nil
+		return "", "", "", nil, false, 0, nil, ""
 	}
 
-	requestLine := strings.TrimSpace(lines[0])
+	first := strings.TrimSpace(lines[0])
+	// Detect response lines that start with HTTP/1.1 200 OK
+	if strings.HasPrefix(first, "HTTP/") {
+		isResponse = true
+		parts := strings.SplitN(first, " ", 3)
+		if len(parts) >= 2 {
+			// parse status code
+			code := strings.TrimSpace(parts[1])
+			if c, err := strconv.Atoi(code); err == nil {
+				respStatus = c
+			}
+		}
+
+		respHeaders = map[string]string{}
+		bodyLines := []string{}
+		headerDone := false
+		for i := 1; i < len(lines); i++ {
+			line := lines[i]
+			if !headerDone && strings.TrimSpace(line) == "" {
+				headerDone = true
+				continue
+			}
+			if !headerDone {
+				idx := strings.Index(line, ":")
+				if idx > 0 {
+					key := strings.ToLower(strings.TrimSpace(line[:idx]))
+					value := strings.TrimSpace(line[idx+1:])
+					switch key {
+					case "content-type", "content-length", "set-cookie", "x-request-id", "traceparent":
+						respHeaders[key] = value
+					default:
+						// keep common headers only to reduce noise
+						if len(respHeaders) < 16 {
+							respHeaders[key] = value
+						}
+					}
+				}
+			} else {
+				bodyLines = append(bodyLines, line)
+			}
+		}
+		if len(bodyLines) > 0 {
+			respBody = strings.Join(bodyLines, "\n")
+		}
+		if len(respHeaders) == 0 {
+			respHeaders = nil
+		}
+
+		return "", "", "", nil, isResponse, respStatus, respHeaders, respBody
+	}
+
+	// Otherwise treat as request
+	requestLine := first
 	parts := strings.SplitN(requestLine, " ", 3)
 	if len(parts) < 2 {
-		return "", "", "", nil
+		return "", "", "", nil, false, 0, nil, ""
 	}
 
 	method = strings.TrimSpace(parts[0])
 	path = strings.TrimSpace(parts[1])
 	if method == "" || path == "" {
-		return "", "", "", nil
+		return "", "", "", nil, false, 0, nil, ""
 	}
 
 	selectedHeaders := map[string]string{}
@@ -227,8 +307,13 @@ func parseHTTPRequest(raw string) (method string, path string, fullURL string, h
 		key := strings.ToLower(strings.TrimSpace(line[:idx]))
 		value := strings.TrimSpace(line[idx+1:])
 		switch key {
-		case "host", "user-agent", "x-request-id", "traceparent", "content-type", "authorization":
+		case "host", "user-agent", "x-request-id", "traceparent", "content-type", "authorization", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "via", "x-envoy-pair":
 			selectedHeaders[key] = value
+		default:
+			// capture envoy-related headers (prefix) and keep small set
+			if strings.HasPrefix(key, "x-envoy-") {
+				selectedHeaders[key] = value
+			}
 		}
 	}
 
@@ -244,7 +329,7 @@ func parseHTTPRequest(raw string) (method string, path string, fullURL string, h
 		selectedHeaders = nil
 	}
 
-	return method, path, fullURL, selectedHeaders
+	return method, path, fullURL, selectedHeaders, false, 0, nil, ""
 }
 
 func htons(i uint16) uint16 {

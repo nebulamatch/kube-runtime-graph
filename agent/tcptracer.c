@@ -102,14 +102,16 @@ int socket_http_filter(struct __sk_buff *skb) {
     char payload[8];
     if (bpf_skb_load_bytes(skb, payload_offset, payload, 8) < 0) return 0;
     
-    // Check for HTTP methods (GET, POST, PUT, DELETE)
+    // Check for HTTP request methods (GET, POST, PUT, DELETE, PATCH)
     int is_http = 0;
     if (payload[0] == 'G' && payload[1] == 'E' && payload[2] == 'T' && payload[3] == ' ') is_http = 1;
     if (payload[0] == 'P' && payload[1] == 'O' && payload[2] == 'S' && payload[3] == 'T') is_http = 1;
     if (payload[0] == 'P' && payload[1] == 'U' && payload[2] == 'T' && payload[3] == ' ') is_http = 1;
     if (payload[0] == 'D' && payload[1] == 'E' && payload[2] == 'L' && payload[3] == 'E') is_http = 1;
     if (payload[0] == 'P' && payload[1] == 'A' && payload[2] == 'T' && payload[3] == 'C') is_http = 1;
-    
+    // Also detect HTTP responses which start with "HTTP/"
+    if (payload[0] == 'H' && payload[1] == 'T' && payload[2] == 'T' && payload[3] == 'P' && payload[4] == '/') is_http = 1;
+
     if (!is_http) return 0;
     
     struct http_event *e = bpf_ringbuf_reserve(&http_events, sizeof(*e), 0);

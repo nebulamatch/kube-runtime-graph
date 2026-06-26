@@ -71,16 +71,10 @@ const layoutTopToBottom = (nodes: any[], edges: any[]): any[] => {
     levelMap.get(lv)!.push(n);
   });
 
-  const positionedStructural = structuralNodes.map((n) => {
-    const lv = level.get(n.id) || 0;
-    const nodesAtLevel = levelMap.get(lv) || [];
-    const indexAtLevel = nodesAtLevel.findIndex((item) => item.id === n.id);
-    const countAtLevel = nodesAtLevel.length;
-    const y = lv * 220 + 120;
-    const x = (indexAtLevel - countAtLevel / 2 + 0.5) * 320;
-    servicePositions.set(n.id, { x, y, level: lv });
-    return { ...n, position: { x, y } };
-  });
+  const POD_ROW_GAP = 170;
+  const SERVICE_ROW_GAP = 460;
+  const BAND_GAP = 240;
+  const SERVICE_COL_GAP = 460;
 
   const podsByService = new Map<string, any[]>();
   podNodes.forEach((pod) => {
@@ -91,6 +85,31 @@ const layoutTopToBottom = (nodes: any[], edges: any[]): any[] => {
     podsByService.get(parentId)!.push(pod);
   });
 
+  const levelOrder = [...levelMap.keys()].sort((a, b) => a - b);
+  const levelYMap = new Map<number, number>();
+  let currentY = 120;
+  levelOrder.forEach((lv) => {
+    levelYMap.set(lv, currentY);
+    const servicesInLevel = levelMap.get(lv) || [];
+    const maxPodsInLevel = Math.max(
+      1,
+      ...servicesInLevel.map((svc) => (podsByService.get(svc.id) || []).length || 0),
+    );
+    const bandHeight = SERVICE_ROW_GAP + Math.max(0, maxPodsInLevel - 1) * POD_ROW_GAP;
+    currentY += bandHeight + BAND_GAP;
+  });
+
+  const positionedStructural = structuralNodes.map((n) => {
+    const lv = level.get(n.id) || 0;
+    const nodesAtLevel = levelMap.get(lv) || [];
+    const indexAtLevel = nodesAtLevel.findIndex((item) => item.id === n.id);
+    const countAtLevel = nodesAtLevel.length;
+    const y = levelYMap.get(lv) || 120;
+    const x = (indexAtLevel - (countAtLevel - 1) / 2) * SERVICE_COL_GAP;
+    servicePositions.set(n.id, { x, y, level: lv });
+    return { ...n, position: { x, y } };
+  });
+
   const positionedPods = podNodes.map((pod) => {
     const parentEdge = edges.find((edge) => edge.source === pod.id && structuralIds.has(edge.target));
     const parentId = parentEdge?.target;
@@ -98,15 +117,14 @@ const layoutTopToBottom = (nodes: any[], edges: any[]): any[] => {
     if (!parentPos) {
       return {
         ...pod,
-        position: { x: 0, y: (Math.max(...Array.from(level.values()), 0) + 1) * 220 + 120 },
+        position: { x: 0, y: currentY },
       };
     }
 
     const siblings = podsByService.get(parentId) || [];
     const index = siblings.findIndex((item) => item.id === pod.id);
-    const count = siblings.length || 1;
-    const x = parentPos.x + (index - (count - 1) / 2) * 210;
-    const y = parentPos.y + 130;
+    const x = parentPos.x;
+    const y = parentPos.y + 180 + Math.max(0, index) * POD_ROW_GAP;
 
     return {
       ...pod,
@@ -114,6 +132,9 @@ const layoutTopToBottom = (nodes: any[], edges: any[]): any[] => {
       data: {
         ...pod.data,
         parentService: parentId?.replace('svc-', ''),
+        podClusterIndex: index,
+        podClusterRow: index,
+        podClusterSize: siblings.length,
       },
     };
   });
@@ -362,6 +383,10 @@ export default function Home() {
       downstreamCount: blastFocus.downstream.size,
     };
   }, [blastFocus.downstream.size, blastFocus.upstream.size, focusNodeId, visibleSnapshot.edges, visibleSnapshot.nodes]);
+
+  const graphFitKey = useMemo(() => {
+    return `${showPods ? 'pods-on' : 'pods-off'}-${timeTravelMinutes}-${visibleSnapshot.nodes.length}-${visibleSnapshot.edges.length}`;
+  }, [showPods, timeTravelMinutes, visibleSnapshot.nodes.length, visibleSnapshot.edges.length]);
 
   useEffect(() => {
     // Artificial delay to show the awesome splash screen
@@ -688,6 +713,7 @@ export default function Home() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onNodeClick={onNodeClick}
+            fitViewKey={graphFitKey}
           />
         </div>
 

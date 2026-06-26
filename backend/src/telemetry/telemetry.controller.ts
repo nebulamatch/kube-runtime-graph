@@ -11,6 +11,7 @@ export interface TelemetryPayload {
   path?: string;
   url?: string;
   headers?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
   statusCode?: number;
   responseBody?: string;
   durationMs?: number;
@@ -75,6 +76,7 @@ export class TelemetryController {
           url: payload.url || payload.path,
           endpoint,
           headers: payload.headers,
+          responseHeaders: (payload as any).responseHeaders,
           statusCode: payload.statusCode,
           responseBody: payload.responseBody,
           durationMs: payload.durationMs,

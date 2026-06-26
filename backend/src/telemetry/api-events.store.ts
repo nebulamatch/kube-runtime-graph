@@ -7,6 +7,7 @@ export interface ApiTraceRecord {
   url?: string;
   endpoint?: string;
   headers?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
   statusCode?: number;
   responseBody?: string;
   sourceIp: string;

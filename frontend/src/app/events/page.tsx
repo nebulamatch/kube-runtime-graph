@@ -409,17 +409,30 @@ export default function EventsPage() {
                 </div>
 
                 <div className="rounded-2xl border border-white/8 bg-surface-container-low p-4">
-                  <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Headers</div>
-                  <pre className="max-h-65 overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Request Headers</div>
+                  <pre className="max-h-32 overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
 {JSON.stringify(selectedEvent.headers || {}, null, 2)}
+                  </pre>
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mt-3 mb-2">Response Headers</div>
+                  <pre className="max-h-32 overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
+{JSON.stringify((selectedEvent as any).responseHeaders || {}, null, 2)}
                   </pre>
                 </div>
 
-                <div className="col-span-2 rounded-2xl border border-white/8 bg-surface-container-low p-4">
-                  <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Raw Event</div>
-                  <pre className="max-h-75 overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
+                <div className="col-span-2 grid grid-cols-2 gap-4">
+                  <div className="rounded-2xl border border-white/8 bg-surface-container-low p-4">
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Response Body</div>
+                    <pre className="max-h-40 overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
+{(selectedEvent.responseBody && selectedEvent.responseBody.length > 0) ? selectedEvent.responseBody : '—'}
+                    </pre>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/8 bg-surface-container-low p-4">
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Raw Event</div>
+                    <pre className="max-h-75 overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
 {JSON.stringify(selectedEvent, null, 2)}
-                  </pre>
+                    </pre>
+                  </div>
                 </div>
               </div>
             </div>

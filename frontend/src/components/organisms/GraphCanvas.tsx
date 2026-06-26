@@ -9,6 +9,7 @@ type GraphCanvasProps = {
   onNodesChange: any;
   onEdgesChange: any;
   onNodeClick: any;
+  fitViewKey?: string;
 };
 
 // Edge with label badge
@@ -52,9 +53,10 @@ const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, 
   );
 };
 
-const GraphCanvasComponent: React.FC<GraphCanvasProps> = ({ nodes, edges, onNodesChange, onEdgesChange, onNodeClick }) => {
+const GraphCanvasComponent: React.FC<GraphCanvasProps> = ({ nodes, edges, onNodesChange, onEdgesChange, onNodeClick, fitViewKey }) => {
   const { fitView } = useReactFlow();
   const initialFitDoneRef = React.useRef(false);
+  const lastFitKeyRef = React.useRef<string | undefined>(undefined);
 
   // Auto fit view only once on first nodes arrival to avoid resetting user zoom/pan
   useEffect(() => {
@@ -70,6 +72,19 @@ const GraphCanvasComponent: React.FC<GraphCanvasProps> = ({ nodes, edges, onNode
       return () => clearTimeout(timer);
     }
   }, [nodes, fitView]);
+
+  useEffect(() => {
+    if (!fitViewKey || fitViewKey === lastFitKeyRef.current || nodes.length === 0) return;
+    lastFitKeyRef.current = fitViewKey;
+    const timer = setTimeout(() => {
+      try {
+          fitView({ padding: 0.24, duration: 500, includeHiddenNodes: true });
+      } catch (e) {
+        // ignore
+      }
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [fitView, fitViewKey, nodes.length]);
 
   // Memoize nodeTypes and edgeTypes to prevent React Flow infinite re-render warning
   const nodeTypes: NodeTypes = useMemo(() => ({
