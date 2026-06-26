@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
-    "strconv"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/cilium/ebpf/link"
@@ -29,16 +31,16 @@ type bpfEvent struct {
 }
 
 type TelemetryPayload struct {
-	SourceIp     string            `json:"sourceIp"`
-	DestIp       string            `json:"destIp"`
-	DestPort     uint16            `json:"destPort"`
-	Method       string            `json:"method,omitempty"`
-	Path         string            `json:"path,omitempty"`
-	URL          string            `json:"url,omitempty"`
-	Headers      map[string]string `json:"headers,omitempty"`
+	SourceIp        string            `json:"sourceIp"`
+	DestIp          string            `json:"destIp"`
+	DestPort        uint16            `json:"destPort"`
+	Method          string            `json:"method,omitempty"`
+	Path            string            `json:"path,omitempty"`
+	URL             string            `json:"url,omitempty"`
+	Headers         map[string]string `json:"headers,omitempty"`
 	ResponseHeaders map[string]string `json:"responseHeaders,omitempty"`
-	StatusCode   int               `json:"statusCode,omitempty"`
-	ResponseBody string            `json:"responseBody,omitempty"`
+	StatusCode      int               `json:"statusCode,omitempty"`
+	ResponseBody    string            `json:"responseBody,omitempty"`
 }
 
 type bpfHttpEvent struct {
@@ -47,6 +49,18 @@ type bpfHttpEvent struct {
 	Dport   uint16
 	Sport   uint16
 	Payload [256]byte
+}
+
+var telemetryQueue = make(chan TelemetryPayload, 256)
+
+var telemetryHTTPClient = &http.Client{
+	Timeout: 5 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:        64,
+		MaxIdleConnsPerHost: 64,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  true,
+	},
 }
 
 func main() {
@@ -117,6 +131,8 @@ func main() {
 		backendUrl = "http://backend-service:3001/api/telemetry"
 	}
 
+	go telemetrySender(backendUrl)
+
 	// Goroutine for L4 TCP Connect events
 	go func() {
 		for {
@@ -142,7 +158,7 @@ func main() {
 				DestIp:   dstIp.String(),
 				DestPort: dport,
 			}
-			go sendTelemetry(backendUrl, payload)
+			enqueueTelemetry(payload)
 		}
 	}()
 
@@ -175,8 +191,7 @@ func main() {
 				continue
 			}
 
-			// Ignore cloud metadata spam
-			if dstIp.String() == "169.254.169.254" || dstIp.String() == "168.63.129.16" {
+			if shouldSkipTelemetry(path, fullURL, dport, dstIp.String()) {
 				continue
 			}
 
@@ -190,7 +205,7 @@ func main() {
 				ResponseHeaders: respHeaders,
 				ResponseBody: respBody,
 			}
-			go sendTelemetry(backendUrl, payload)
+			enqueueTelemetry(payload)
 			continue
 		}
 
@@ -203,8 +218,7 @@ func main() {
 			continue
 		}
 
-		// Ignore cloud metadata spam
-		if dstIp.String() == "169.254.169.254" || dstIp.String() == "168.63.129.16" {
+		if shouldSkipTelemetry(path, fullURL, dport, dstIp.String()) {
 			continue
 		}
 
@@ -219,7 +233,7 @@ func main() {
 			URL:      fullURL,
 			Headers:  parsedHeaders,
 		}
-		go sendTelemetry(backendUrl, payload)
+		enqueueTelemetry(payload)
 	}
 }
 
@@ -344,14 +358,49 @@ func intToIP(ip uint32) net.IP {
 	return result
 }
 
+func enqueueTelemetry(payload TelemetryPayload) {
+	select {
+	case telemetryQueue <- payload:
+	default:
+	}
+}
+
+func telemetrySender(url string) {
+	for payload := range telemetryQueue {
+		sendTelemetry(url, payload)
+	}
+}
+
+func shouldSkipTelemetry(path, fullURL string, dport uint16, dstIP string) bool {
+	if dstIP == "169.254.169.254" || dstIP == "168.63.129.16" {
+		return true
+	}
+	switch dport {
+	case 9153, 10250, 10255, 10257, 10259:
+		return true
+	}
+	lowerPath := strings.ToLower(path)
+	if strings.HasPrefix(lowerPath, "/metrics") || strings.HasPrefix(lowerPath, "/health") || strings.HasPrefix(lowerPath, "/ready") || strings.HasPrefix(lowerPath, "/live") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(fullURL), "/api/telemetry")
+}
+
 func sendTelemetry(url string, payload TelemetryPayload) {
 	jsonData, _ := json.Marshal(payload)
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("Failed to create telemetry request: %s", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := telemetryHTTPClient.Do(req)
 	if err != nil {
 		log.Printf("Failed to send telemetry: %s", err)
 		return
 	}
 	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
 }
 
 func waitSignal() <-chan os.Signal {
