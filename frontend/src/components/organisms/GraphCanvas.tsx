@@ -38,8 +38,13 @@ const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, 
           className="flex items-center justify-center pointer-events-none"
           requiredExtensions="http://www.w3.org/1999/xhtml"
         >
-          <div className="flex justify-center w-full h-full pt-2">
+          <div className="flex flex-col items-center justify-center w-full h-full pt-2 gap-1">
             <Badge text={data.label} variant={badgeVariant as any} />
+            {data?.originService && (
+              <div className="rounded-full border border-white/10 bg-black/45 px-2 py-0.5 text-[9px] text-outline-variant whitespace-nowrap">
+                {data.originService}
+              </div>
+            )}
           </div>
         </foreignObject>
       )}

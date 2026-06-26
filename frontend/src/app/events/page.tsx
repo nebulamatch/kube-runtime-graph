@@ -108,32 +108,8 @@ export default function EventsPage() {
 
     fetchEvents();
 
-    const svcUrl = apiUrl(`/api/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/services`);
-    fetch(svcUrl)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((svcs) => {
-        const names = (svcs || [])
-          .map((s: any) => s.name)
-          .filter(Boolean)
-          .filter((svc: string) => !isSystemServiceName(svc))
-          .sort();
-        setServicesList(names);
-      })
-      .catch(() => setServicesList([]));
-
     const interval = setInterval(() => {
       fetchEvents();
-      fetch(svcUrl)
-        .then((r) => (r.ok ? r.json() : []))
-        .then((svcs) =>
-          setServicesList(
-            (svcs || [])
-              .map((s: any) => s.name)
-              .filter(Boolean)
-              .filter((svc: string) => !isSystemServiceName(svc))
-              .sort()
-          )
-        );
     }, 30000);
 
     return () => clearInterval(interval);
@@ -204,7 +180,7 @@ export default function EventsPage() {
 
   return (
     <DashboardLayout>
-      <div className="h-full flex flex-col p-6 overflow-hidden bg-gradient-to-b from-surface to-surface-container-lowest">
+      <div className="h-full flex flex-col p-6 overflow-hidden bg-linear-to-b from-surface to-surface-container-lowest">
         <div className="flex items-center justify-between mb-5">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -260,7 +236,7 @@ export default function EventsPage() {
           <select
             value={serviceFilter}
             onChange={(e) => setServiceFilter(e.target.value)}
-            className="min-w-[180px] rounded-xl bg-surface-container px-3 py-2 text-sm text-on-surface outline-none border border-white/6"
+            className="min-w-45 rounded-xl bg-surface-container px-3 py-2 text-sm text-on-surface outline-none border border-white/6"
           >
             <option value="">All services</option>
             {servicesList.map((s) => (
@@ -273,7 +249,7 @@ export default function EventsPage() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="min-w-[120px] rounded-xl bg-surface-container px-3 py-2 text-sm text-on-surface outline-none border border-white/6"
+            className="min-w-30 rounded-xl bg-surface-container px-3 py-2 text-sm text-on-surface outline-none border border-white/6"
           >
             <option value="all">All status</option>
             <option value="200">2xx</option>
@@ -336,14 +312,14 @@ export default function EventsPage() {
                     return (
                       <tr key={evt.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                         <td className="px-4 py-3 text-[11px] text-[#b4bac4] whitespace-nowrap font-mono">{formatTime(evt.timestamp)}</td>
-                        <td className="px-4 py-3 min-w-[180px]">
-                          <div className="font-semibold text-on-surface text-sm truncate max-w-[220px]">{sourceLabel}</div>
+                        <td className="px-4 py-3 min-w-45">
+                          <div className="font-semibold text-on-surface text-sm truncate max-w-55">{sourceLabel}</div>
                           {evt.sourceService && evt.sourceService !== evt.sourcePod && (
                             <div className="text-[11px] text-outline-variant">svc: {evt.sourceService}</div>
                           )}
                         </td>
-                        <td className="px-4 py-3 min-w-[180px]">
-                          <div className="font-semibold text-on-surface text-sm truncate max-w-[220px]">{destLabel}</div>
+                        <td className="px-4 py-3 min-w-45">
+                          <div className="font-semibold text-on-surface text-sm truncate max-w-55">{destLabel}</div>
                           {evt.destService && evt.destService !== evt.destPod && (
                             <div className="text-[11px] text-outline-variant">svc: {evt.destService}</div>
                           )}
@@ -353,10 +329,10 @@ export default function EventsPage() {
                             {method}
                           </span>
                         </td>
-                        <td className="px-4 py-3 min-w-[280px]">
-                          <div className="font-mono text-sm text-on-surface truncate max-w-[420px]">{endpoint}</div>
+                        <td className="px-4 py-3 min-w-70">
+                          <div className="font-mono text-sm text-on-surface truncate max-w-105">{endpoint}</div>
                           {evt.url && evt.url !== endpoint && (
-                            <div className="text-[11px] text-outline-variant truncate max-w-[420px]">{evt.url}</div>
+                            <div className="text-[11px] text-outline-variant truncate max-w-105">{evt.url}</div>
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -434,14 +410,14 @@ export default function EventsPage() {
 
                 <div className="rounded-2xl border border-white/8 bg-surface-container-low p-4">
                   <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Headers</div>
-                  <pre className="max-h-[260px] overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
+                  <pre className="max-h-65 overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
 {JSON.stringify(selectedEvent.headers || {}, null, 2)}
                   </pre>
                 </div>
 
                 <div className="col-span-2 rounded-2xl border border-white/8 bg-surface-container-low p-4">
                   <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Raw Event</div>
-                  <pre className="max-h-[300px] overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
+                  <pre className="max-h-75 overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
 {JSON.stringify(selectedEvent, null, 2)}
                   </pre>
                 </div>

@@ -521,6 +521,7 @@ export class GraphService {
       const sourceServiceId = this.ipToServiceCache.get(payload.sourceIp);
       const destServiceId = this.ipToServiceCache.get(payload.destIp);
       const sourcePodId = this.podCache.get(payload.sourceIp);
+      const destPodId = this.podCache.get(payload.destIp);
       const sourceLabel = sourceServiceId ? sourceServiceId.replace('svc-', '') : (sourcePodId ? sourcePodId.replace('pod-', '') : 'unknown');
 
       // Track service-to-service relationships for hierarchical layout
@@ -555,15 +556,19 @@ export class GraphService {
           durationMs: payload.durationMs,
           sourceIp: payload.sourceIp,
           destIp: payload.destIp,
+          sourceService: sourceServiceId?.replace('svc-', ''),
+          destService: destServiceId?.replace('svc-', ''),
+          sourcePod: sourcePodId?.replace('pod-', ''),
+          destPod: destPodId?.replace('pod-', ''),
           originService: sourceLabel,
+          originType: sourceServiceId ? 'service' : sourcePodId ? 'pod' : 'unknown',
+          requestOrigin: sourcePodId?.replace('pod-', '') || sourceServiceId?.replace('svc-', '') || sourceLabel,
           timestamp: new Date().toISOString(),
         }
       };
       
       this.activeEdges.set(edge.id, edge);
       this.invalidateGraphCache();
-
-      const destPodId = this.podCache.get(payload.destIp);
 
       const sourceNamespace = this.ipToNamespaceCache.get(payload.sourceIp)
         || (sourceServiceId ? this.getNamespaceFromNodeId(sourceServiceId) : undefined);

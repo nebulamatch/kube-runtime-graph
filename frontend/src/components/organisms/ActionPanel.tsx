@@ -108,12 +108,20 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
   }, [connectedEdges]);
 
   const contractRows = useMemo(() => {
-    const grouped = new Map<string, { endpoint: string; count: number; errors: number; lastStatus?: number; totalDuration: number }>();
+    const grouped = new Map<string, { endpoint: string; count: number; errors: number; lastStatus?: number; totalDuration: number; origin: string; destination: string }>();
 
     connectedEdges.forEach((edge) => {
       const endpoint = edge.data?.endpoint || edge.label || 'TCP';
       const key = `${edge.source}::${edge.target}::${endpoint}`;
-      const entry = grouped.get(key) || { endpoint, count: 0, errors: 0, lastStatus: undefined, totalDuration: 0 };
+      const entry = grouped.get(key) || {
+        endpoint,
+        count: 0,
+        errors: 0,
+        lastStatus: undefined,
+        totalDuration: 0,
+        origin: edge.data?.originService || edge.data?.requestOrigin || edge.source,
+        destination: edge.data?.destService || edge.target,
+      };
       entry.count += 1;
       if (Number(edge.data?.statusCode || 0) >= 400) entry.errors += 1;
       entry.lastStatus = edge.data?.statusCode ?? entry.lastStatus;
@@ -150,7 +158,7 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="absolute right-6 top-6 bottom-6 w-[470px] glass-panel flex flex-col z-50 overflow-hidden animate-in slide-in-from-right duration-300">
+    <div className="absolute right-6 top-6 bottom-6 w-117.5 glass-panel flex flex-col z-50 overflow-hidden animate-in slide-in-from-right duration-300">
       <div className="flex items-start justify-between gap-4 p-5 border-b border-white/10 bg-surface-container-low/60 backdrop-blur-xl">
         <div className="min-w-0">
           <Typography variant="h2" className="text-on-surface truncate">
@@ -158,7 +166,7 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
           </Typography>
           <div className="flex flex-wrap items-center gap-2 mt-1">
             <span className={`w-2.5 h-2.5 rounded-full ${nodeType === 'service' ? 'bg-primary' : nodeType === 'db' ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-            <Typography variant="label" className="!text-[10px] text-on-surface-variant uppercase tracking-[0.18em]">
+            <Typography variant="label" className="text-[10px]! text-on-surface-variant uppercase tracking-[0.18em]">
               {nodeType} • {timeTravelMinutes > 0 ? `Replay ${timeTravelMinutes}m` : 'Live'}
             </Typography>
             {blastMode && (
@@ -247,6 +255,20 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
               </div>
             </div>
 
+            {blastFocus?.node && (
+              <div className="mb-4 rounded-2xl border border-white/8 bg-surface-container-low/30 p-4">
+                <Typography variant="label" className="mb-3 block text-outline-variant">Request Origin</Typography>
+                <div className="space-y-2 text-xs text-outline-variant">
+                  <div className="rounded-xl border border-white/8 bg-white/4 p-3">
+                    Origin: <span className="text-on-surface font-semibold">{blastFocus.incoming[0]?.data?.originService || blastFocus.node.data?.label || '—'}</span>
+                  </div>
+                  <div className="rounded-xl border border-white/8 bg-white/4 p-3">
+                    Target: <span className="text-on-surface font-semibold">{blastFocus.node.data?.label || '—'}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="mb-4 rounded-2xl border border-white/8 bg-surface-container-low/30 p-4">
               <Typography variant="label" className="mb-3 block text-outline-variant">Active L7 Contract Matrix</Typography>
               <div className="space-y-2">
@@ -257,6 +279,7 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
                       <div className="text-outline-variant">{row.errors}/{row.count} failed</div>
                     </div>
                     <div className="mt-1 flex items-center justify-between text-outline-variant">
+                      <span>{row.origin} → {row.destination}</span>
                       <span>Status {row.lastStatus ?? '—'}</span>
                       <span>Avg {row.count ? Math.round(row.totalDuration / row.count) : 0} ms</span>
                     </div>
@@ -333,7 +356,7 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
                 <Typography variant="label" className="text-outline-variant">Live Log Terminal</Typography>
                 <div className="text-[11px] text-outline-variant">{visibleLogs.length} lines</div>
               </div>
-              <div className="max-h-[380px] overflow-y-auto terminal-scroll rounded-xl border border-white/8 bg-black/30 p-3 font-mono text-[11px] leading-relaxed text-on-surface">
+              <div className="max-h-95 overflow-y-auto terminal-scroll rounded-xl border border-white/8 bg-black/30 p-3 font-mono text-[11px] leading-relaxed text-on-surface">
                 {visibleLogs.length > 0 ? visibleLogs.slice(-250).map((line, index) => {
                   const severity = inferSeverity(line);
                   return (

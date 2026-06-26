@@ -19,25 +19,29 @@ const stripAnsi = (str: string) => {
 const layoutTopToBottom = (nodes: any[], edges: any[]): any[] => {
   if (nodes.length === 0) return nodes;
 
-  // Build adjacency map and calculate in-degrees
+  const isPod = (node: any) => (node.data?.type || node.type) === 'pod';
+  const structuralNodes = nodes.filter((node) => !isPod(node));
+  const podNodes = nodes.filter((node) => isPod(node));
+
+  const structuralIds = new Set(structuralNodes.map((node) => node.id));
+  const structuralEdges = edges.filter((edge) => structuralIds.has(edge.source) && structuralIds.has(edge.target));
+
   const adj = new Map<string, string[]>();
   const inDegree = new Map<string, number>();
-  const nodeMap = new Map(nodes.map(n => [n.id, n]));
 
-  nodes.forEach(n => {
+  structuralNodes.forEach((n) => {
     if (!inDegree.has(n.id)) inDegree.set(n.id, 0);
     if (!adj.has(n.id)) adj.set(n.id, []);
   });
 
-  edges.forEach(e => {
+  structuralEdges.forEach((e) => {
     adj.get(e.source)?.push(e.target);
     inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
   });
 
-  // Topological sort with level assignment
   const queue: string[] = [];
   const level = new Map<string, number>();
-  
+
   inDegree.forEach((degree, nodeId) => {
     if (degree === 0) {
       queue.push(nodeId);
@@ -45,55 +49,76 @@ const layoutTopToBottom = (nodes: any[], edges: any[]): any[] => {
     }
   });
 
-  let processed = 0;
   while (queue.length > 0) {
     const node = queue.shift()!;
-    processed++;
-
-    adj.get(node)?.forEach(child => {
+    adj.get(node)?.forEach((child) => {
       const childLevel = (level.get(node) || 0) + 1;
       level.set(child, Math.max(level.get(child) || 0, childLevel));
-
       inDegree.set(child, (inDegree.get(child) || 0) - 1);
-      if (inDegree.get(child) === 0) {
-        queue.push(child);
-      }
+      if (inDegree.get(child) === 0) queue.push(child);
     });
   }
 
-  // If not all nodes processed, handle cycles by assigning remaining
-  if (processed < nodes.length) {
-    nodes.forEach(n => {
-      if (!level.has(n.id)) level.set(n.id, 0);
-    });
-  }
-
-  // Group nodes by level
-  const levelMap = new Map<number, string[]>();
-  level.forEach((lv, nodeId) => {
-    if (!levelMap.has(lv)) levelMap.set(lv, []);
-    levelMap.get(lv)?.push(nodeId);
+  structuralNodes.forEach((n) => {
+    if (!level.has(n.id)) level.set(n.id, 0);
   });
 
-  // Position nodes: top-to-bottom (Y), spread horizontally (X)
-  const positioned = nodes.map(n => {
+  const servicePositions = new Map<string, { x: number; y: number; level: number }>();
+  const levelMap = new Map<number, any[]>();
+  structuralNodes.forEach((n) => {
+    const lv = level.get(n.id) || 0;
+    if (!levelMap.has(lv)) levelMap.set(lv, []);
+    levelMap.get(lv)!.push(n);
+  });
+
+  const positionedStructural = structuralNodes.map((n) => {
     const lv = level.get(n.id) || 0;
     const nodesAtLevel = levelMap.get(lv) || [];
-    const indexAtLevel = nodesAtLevel.indexOf(n.id);
+    const indexAtLevel = nodesAtLevel.findIndex((item) => item.id === n.id);
     const countAtLevel = nodesAtLevel.length;
+    const y = lv * 220 + 120;
+    const x = (indexAtLevel - countAtLevel / 2 + 0.5) * 320;
+    servicePositions.set(n.id, { x, y, level: lv });
+    return { ...n, position: { x, y } };
+  });
 
-    // Y: 200px per level (top-to-bottom)
-    // X: spread evenly at each level
-    const y = lv * 200 + 100;
-    const x = (indexAtLevel - countAtLevel / 2 + 0.5) * 250;
+  const podsByService = new Map<string, any[]>();
+  podNodes.forEach((pod) => {
+    const parentEdge = edges.find((edge) => edge.source === pod.id && structuralIds.has(edge.target));
+    const parentId = parentEdge?.target;
+    if (!parentId) return;
+    if (!podsByService.has(parentId)) podsByService.set(parentId, []);
+    podsByService.get(parentId)!.push(pod);
+  });
+
+  const positionedPods = podNodes.map((pod) => {
+    const parentEdge = edges.find((edge) => edge.source === pod.id && structuralIds.has(edge.target));
+    const parentId = parentEdge?.target;
+    const parentPos = parentId ? servicePositions.get(parentId) : undefined;
+    if (!parentPos) {
+      return {
+        ...pod,
+        position: { x: 0, y: (Math.max(...Array.from(level.values()), 0) + 1) * 220 + 120 },
+      };
+    }
+
+    const siblings = podsByService.get(parentId) || [];
+    const index = siblings.findIndex((item) => item.id === pod.id);
+    const count = siblings.length || 1;
+    const x = parentPos.x + (index - (count - 1) / 2) * 210;
+    const y = parentPos.y + 130;
 
     return {
-      ...n,
+      ...pod,
       position: { x, y },
+      data: {
+        ...pod.data,
+        parentService: parentId?.replace('svc-', ''),
+      },
     };
   });
 
-  return positioned;
+  return [...positionedStructural, ...positionedPods];
 };
 
 const cloneGraph = (nodes: any[], edges: any[]) => ({
@@ -197,7 +222,6 @@ const deriveMismatchAlerts = (edges: any[], focusNodeId?: string | null) => {
   grouped.forEach((group, key) => {
     const httpEdges = group.filter((edge) => edge.data?.endpoint || edge.data?.method || edge.data?.statusCode != null);
     const errorEdges = group.filter((edge) => Number(edge.data?.statusCode || 0) >= 400);
-    const tcpOnlyEdges = group.filter((edge) => !edge.data?.endpoint && !edge.data?.method);
 
     if (httpEdges.length > 0 && errorEdges.length > 0) {
       const sample = errorEdges[0];
@@ -206,16 +230,6 @@ const deriveMismatchAlerts = (edges: any[], focusNodeId?: string | null) => {
         title: 'L7 contract degradation',
         detail: `${sample.data?.originService || sample.source} → ${sample.target} is returning ${sample.data?.statusCode || '4xx/5xx'} for ${sample.data?.endpoint || 'an HTTP route'}.`,
         severity: Number(sample.data?.statusCode || 0) >= 500 ? 'error' : 'warn',
-      });
-    }
-
-    if (tcpOnlyEdges.length > 0 && httpEdges.length === 0) {
-      const sample = tcpOnlyEdges[0];
-      alerts.push({
-        id: `${key}-tcp`,
-        title: 'L4 observed without L7 contract',
-        detail: `${sample.source} → ${sample.target} has TCP connectivity but no parsed HTTP contract yet.`,
-        severity: 'warn',
       });
     }
   });
@@ -401,14 +415,20 @@ export default function Home() {
         console.log(`Edge ${e.id}: sourceType=${sourceType}, targetType=${targetType}`);
         // Determine if special edge (service-to-service, pod-to-db, etc)
         const isSpecialConnection = sourceType !== 'pod' || targetType !== 'pod';
+        const statusCode = Number(e.data?.statusCode || 0);
+        const durationMs = Number(e.data?.durationMs || 0);
+        const isError = statusCode >= 400;
+        const thickness = Math.max(2, Math.min(6, durationMs > 0 ? Math.round(durationMs / 150) + 2 : 3));
         
         return {
           ...e,
           type: e.type || 'custom',
-          markerEnd: { type: MarkerType.ArrowClosed, color: isSpecialConnection ? '#f97316' : 'var(--color-primary-container)' },
-          style: isSpecialConnection 
-            ? { strokeWidth: 4, stroke: '#f97316', strokeDasharray: '5,5' } 
-            : { strokeWidth: 2, stroke: 'var(--color-primary-container)' },
+          markerEnd: { type: MarkerType.ArrowClosed, color: isError ? '#ff4d6d' : isSpecialConnection ? '#f97316' : 'var(--color-primary-container)' },
+          style: isError
+            ? { strokeWidth: thickness + 1, stroke: '#ff4d6d', strokeDasharray: '2,3' }
+            : isSpecialConnection 
+              ? { strokeWidth: Math.max(3, thickness), stroke: '#f97316', strokeDasharray: '5,5' } 
+              : { strokeWidth: thickness, stroke: 'var(--color-primary-container)' },
           animated: true,
         };
       });
@@ -455,6 +475,11 @@ export default function Home() {
           isSpecialEdge = sourceType !== 'pod' || targetType !== 'pod';
         }
 
+        const statusCode = Number(incomingEdge.data?.statusCode || incomingEdge.statusCode || 0);
+        const durationMs = Number(incomingEdge.data?.durationMs || incomingEdge.durationMs || 0);
+        const isError = statusCode >= 400;
+        const thickness = Math.max(2, Math.min(6, durationMs > 0 ? Math.round(durationMs / 150) + 2 : 3));
+
         const normalized = {
           id: incomingEdge.id,
           source: incomingEdge.source,
@@ -462,11 +487,13 @@ export default function Home() {
           animated: incomingEdge.animated ?? true,
           label: incomingEdge.label ?? undefined,
           data: incomingEdge.data ?? incomingEdge,
-          style: isSpecialEdge
-            ? { strokeWidth: 4, stroke: '#f97316', strokeDasharray: '5,5' }
-            : incomingEdge.style ?? { strokeWidth: 3, stroke: '#10b981' },
+          style: isError
+            ? { strokeWidth: thickness + 1, stroke: '#ff4d6d', strokeDasharray: '2,3' }
+            : isSpecialEdge
+              ? { strokeWidth: Math.max(3, thickness), stroke: '#f97316', strokeDasharray: '5,5' }
+              : incomingEdge.style ?? { strokeWidth: thickness, stroke: '#10b981' },
           type: incomingEdge.type ?? 'custom',
-          markerEnd: { type: MarkerType.ArrowClosed, color: isSpecialEdge ? '#f97316' : '#10b981' },
+          markerEnd: { type: MarkerType.ArrowClosed, color: isError ? '#ff4d6d' : isSpecialEdge ? '#f97316' : '#10b981' },
         } as any;
 
         if (exists) {
@@ -622,7 +649,7 @@ export default function Home() {
                 step={5}
                 value={timeTravelMinutes}
                 onChange={(e) => setTimeTravelMinutes(Number(e.target.value))}
-                className="w-[220px] accent-primary"
+                className="w-55 accent-primary"
               />
               <span className="text-xs text-outline-variant w-12 text-right">{timeTravelMinutes}m</span>
             </div>
