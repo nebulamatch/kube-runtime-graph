@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+    "fmt"
 	"net"
 	"net/http"
+	"sync"
 	"os"
 	"os/signal"
 	"strconv"
@@ -61,6 +63,36 @@ var telemetryHTTPClient = &http.Client{
 		IdleConnTimeout:     90 * time.Second,
 		DisableCompression:  true,
 	},
+}
+
+type requestInfo struct {
+	ts      time.Time
+ 	tmethod string
+ 	tpath   string
+ 	turl    string
+ 	theaders map[string]string
+}
+
+var reqMap = struct {
+	sync.Mutex
+	m map[string]requestInfo
+}{m: make(map[string]requestInfo)}
+
+// periodic cleanup for stale requests
+func init() {
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		for range ticker.C {
+			cutoff := time.Now().Add(-60 * time.Second)
+			reqMap.Lock()
+			for k, v := range reqMap.m {
+				if v.ts.Before(cutoff) {
+					delete(reqMap.m, k)
+				}
+			}
+			reqMap.Unlock()
+		}
+	}()
 }
 
 func main() {
@@ -363,6 +395,10 @@ func enqueueTelemetry(payload TelemetryPayload) {
 	case telemetryQueue <- payload:
 	default:
 	}
+}
+
+func tupleKey(clientIP string, clientPort uint16, serverIP string, serverPort uint16) string {
+	return fmt.Sprintf("%s:%d->%s:%d", clientIP, clientPort, serverIP, serverPort)
 }
 
 func telemetrySender(url string) {

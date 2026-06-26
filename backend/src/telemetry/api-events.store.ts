@@ -18,6 +18,11 @@ export interface ApiTraceRecord {
   sourcePod?: string;
   destPod?: string;
   durationMs?: number;
+  analysis?: {
+    severity: 'info' | 'warning' | 'error';
+    summary: string;
+    suggestion?: string;
+  };
 }
 
 export class ApiEventsStore {

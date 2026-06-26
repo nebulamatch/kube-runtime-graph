@@ -17,6 +17,12 @@ export interface TelemetryPayload {
   durationMs?: number;
 }
 
+interface TelemetryAnalysis {
+  severity: 'info' | 'warning' | 'error';
+  summary: string;
+  suggestion?: string;
+}
+
 @Controller('api/telemetry')
 export class TelemetryController {
   private broadcastTimer: NodeJS.Timeout | null = null;
@@ -67,6 +73,29 @@ export class TelemetryController {
       const hasTraceContext = !!(payload.method || payload.path || payload.url || payload.headers || payload.statusCode || endpoint);
 
       if (hasServiceContext || hasTraceContext) {
+        // compute a small analysis summary to help triage on the Events UI
+        const analysis: TelemetryAnalysis | undefined = ((): TelemetryAnalysis | undefined => {
+          if (payload?.statusCode && payload.statusCode >= 500) {
+            return { severity: 'error', summary: `Server error ${payload.statusCode}`, suggestion: 'Check destination pod logs, inspect application errors and recent deployments.' };
+          }
+          if (payload?.statusCode && payload.statusCode >= 400) {
+            if (payload.statusCode === 401 || payload.statusCode === 403) {
+              return { severity: 'warning', summary: `Auth error ${payload.statusCode}`, suggestion: 'Verify authentication tokens/headers and RBAC.' };
+            }
+            if (payload.statusCode === 429) {
+              return { severity: 'warning', summary: 'Rate limited (429)', suggestion: 'Consider throttling clients or increasing quota.' };
+            }
+            return { severity: 'warning', summary: `Client error ${payload.statusCode}`, suggestion: 'Inspect request parameters and client headers.' };
+          }
+          if (payload?.durationMs && payload.durationMs > 2000) {
+            return { severity: 'warning', summary: `Slow response ${payload.durationMs}ms`, suggestion: 'Investigate downstream latency, DB or network slow paths.' };
+          }
+          if (payload?.statusCode === undefined && !payload?.responseBody && !payload?.responseHeaders) {
+            return undefined;
+          }
+          return { severity: 'info', summary: 'OK' };
+        })();
+
         ApiEventsStore.add({
           id: `trace-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           timestamp: new Date().toISOString(),
@@ -87,6 +116,7 @@ export class TelemetryController {
           destService,
           sourcePod,
           destPod,
+          analysis,
         });
       }
     } catch {
