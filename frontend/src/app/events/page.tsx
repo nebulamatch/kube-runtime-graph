@@ -70,6 +70,18 @@ export default function EventsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<KubeEvent | null>(null);
 
+  const requestOrigin = (evt?: KubeEvent | null) => {
+    if (!evt) return '-';
+    const forwarded = evt.headers?.['x-forwarded-for'] || evt.headers?.['x-forwarded-host'];
+    if (forwarded) return String(forwarded).split(',')[0].trim();
+    return evt.sourceService || evt.sourcePod || evt.sourceIp || '-';
+  };
+
+  const statusLabel = (evt?: KubeEvent | null) => {
+    if (!evt?.statusCode) return 'Request captured';
+    return `${evt.statusCode}`;
+  };
+
   const fetchEvents = () => {
     if (!selectedContext || !selectedNamespace) return;
     setLoading(true);
@@ -400,10 +412,16 @@ export default function EventsPage() {
                   <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Request</div>
                   <div className="space-y-2 text-sm">
                     <div><span className="text-outline-variant">Namespace:</span> <span className="text-on-surface">{selectedEvent.namespace}</span></div>
+                    <div><span className="text-outline-variant">Source Service:</span> <span className="text-on-surface">{selectedEvent.sourceService || '-'}</span></div>
                     <div><span className="text-outline-variant">Source Pod:</span> <span className="text-on-surface">{selectedEvent.sourcePod || selectedEvent.sourceService || selectedEvent.sourceIp || '-'}</span></div>
+                    <div><span className="text-outline-variant">Source IP:</span> <span className="text-on-surface font-mono">{selectedEvent.sourceIp || '-'}</span></div>
+                    <div><span className="text-outline-variant">Destination Service:</span> <span className="text-on-surface">{selectedEvent.destService || '-'}</span></div>
                     <div><span className="text-outline-variant">Destination Pod:</span> <span className="text-on-surface">{selectedEvent.destPod || selectedEvent.destService || selectedEvent.destIp || '-'}</span></div>
+                    <div><span className="text-outline-variant">Destination IP:</span> <span className="text-on-surface font-mono">{selectedEvent.destIp || '-'}</span></div>
+                    <div><span className="text-outline-variant">Destination Port:</span> <span className="text-on-surface font-mono">{selectedEvent.destPort ?? '-'}</span></div>
                     <div><span className="text-outline-variant">Endpoint:</span> <span className="text-on-surface font-mono">{selectedEvent.endpoint || selectedEvent.url || selectedEvent.path || '-'}</span></div>
-                    <div><span className="text-outline-variant">Status:</span> <span className="text-on-surface">{selectedEvent.statusCode ?? 'Unknown'}</span></div>
+                    <div><span className="text-outline-variant">Request Origin:</span> <span className="text-on-surface">{requestOrigin(selectedEvent)}</span></div>
+                    <div><span className="text-outline-variant">Status:</span> <span className="text-on-surface">{statusLabel(selectedEvent)}</span></div>
                     <div><span className="text-outline-variant">Duration:</span> <span className="text-on-surface">{formatDuration(selectedEvent.durationMs)}</span></div>
                   </div>
                 </div>
@@ -415,7 +433,7 @@ export default function EventsPage() {
                   </pre>
                   <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mt-3 mb-2">Response Headers</div>
                   <pre className="max-h-32 overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
-{JSON.stringify((selectedEvent as any).responseHeaders || {}, null, 2)}
+{JSON.stringify((selectedEvent as any).responseHeaders || {}, null, 2) || '{}'}
                   </pre>
                 </div>
 
@@ -423,7 +441,7 @@ export default function EventsPage() {
                   <div className="rounded-2xl border border-white/8 bg-surface-container-low p-4">
                     <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Response Body</div>
                     <pre className="max-h-40 overflow-auto terminal-scroll text-xs text-on-surface-variant whitespace-pre-wrap break-all">
-{(selectedEvent.responseBody && selectedEvent.responseBody.length > 0) ? selectedEvent.responseBody : '—'}
+{(selectedEvent.responseBody && selectedEvent.responseBody.length > 0) ? selectedEvent.responseBody : 'Response body not captured by the agent'}
                     </pre>
                   </div>
 
