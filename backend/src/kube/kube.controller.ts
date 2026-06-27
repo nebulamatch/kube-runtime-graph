@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Delete, Post, Body } from '@nestjs/common';
 import { KubeService } from './kube.service';
 import { ApiEventsStore } from '../telemetry/api-events.store';
 
@@ -55,5 +55,43 @@ export class KubeController {
     @Param('namespace') namespace: string,
   ) {
     return this.kubeService.getRbac(context, namespace);
+  }
+
+  @Delete('contexts/:context/namespaces/:namespace/services/:service')
+  async deleteService(
+    @Param('context') context: string,
+    @Param('namespace') namespace: string,
+    @Param('service') serviceName: string,
+  ) {
+    return this.kubeService.deleteService(context, namespace, serviceName);
+  }
+
+  @Delete('contexts/:context/namespaces/:namespace/pods/:pod')
+  async deletePod(
+    @Param('context') context: string,
+    @Param('namespace') namespace: string,
+    @Param('pod') podName: string,
+  ) {
+    return this.kubeService.deletePod(context, namespace, podName);
+  }
+
+  @Post('contexts/:context/namespaces/:namespace/pods/:pod/exec')
+  async execCommand(
+    @Param('context') context: string,
+    @Param('namespace') namespace: string,
+    @Param('pod') podName: string,
+    @Body('command') command: string,
+  ) {
+    return this.kubeService.execCommand(context, namespace, podName, command);
+  }
+
+  @Post('contexts/:context/namespaces/:namespace/pods/:pod/portforward')
+  async portForward(
+    @Param('context') context: string,
+    @Param('namespace') namespace: string,
+    @Param('pod') podName: string,
+    @Body('targetPort') targetPort: number,
+  ) {
+    return this.kubeService.portForward(context, namespace, podName, targetPort);
   }
 }

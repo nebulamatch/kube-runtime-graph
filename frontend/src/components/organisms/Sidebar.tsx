@@ -28,7 +28,8 @@ export const Sidebar: React.FC = () => {
         <Typography variant="label" className="px-4 mb-3 text-outline-variant">
           Observability
         </Typography>
-        <NavMenuItem href="/" label="Overview" icon={<DashboardIcon fontSize="small" />} isActive={pathname === '/'} />
+        <NavMenuItem href="/" label="Topology Graph" icon={<DashboardIcon fontSize="small" />} isActive={pathname === '/'} />
+        <NavMenuItem href="/dashboard" label="Metrics Dashboard" icon={<ListAltIcon fontSize="small" />} isActive={pathname === '/dashboard'} />
         <NavMenuItem href="/events" label="API Events" icon={<ListAltIcon fontSize="small" />} isActive={pathname === '/events'} />
         <NavMenuItem href="/logs" label="Log Management" icon={<TerminalIcon fontSize="small" />} isActive={pathname === '/logs'} />
         

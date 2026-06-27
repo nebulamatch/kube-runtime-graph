@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Typography } from '../atoms/Typography';
+import { useKubeGlobal } from '../../context/KubeContext';
+import { apiFetch } from '../../lib/backend';
 import { Button } from '../atoms/Button';
 import CloseIcon from '@mui/icons-material/Close';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -21,7 +23,7 @@ const inferSeverity = (line: string) => {
   return 'INFO';
 };
 
-type DrawerTab = 'telemetry' | 'logs';
+type DrawerTab = 'telemetry' | 'logs' | 'pods';
 
 type BlastFocusSummary = {
   node?: any;
@@ -45,6 +47,7 @@ type ActionPanelProps = {
   mismatchAlerts?: Array<{ id: string; title: string; detail: string; severity: 'warn' | 'error' }>;
   timeTravelMinutes?: number;
   onToggleBlastMode?: () => void;
+  nodes?: any[];
 };
 
 const safeNumber = (value: any) => (Number.isFinite(Number(value)) ? Number(value) : 0);
@@ -63,12 +66,22 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
   mismatchAlerts = [],
   timeTravelMinutes = 0,
   onToggleBlastMode,
+  nodes = [],
 }) => {
+  const { selectedContext, selectedNamespace } = useKubeGlobal();
   const [internalTab, setInternalTab] = useState<DrawerTab>('telemetry');
   const [logQuery, setLogQuery] = useState('');
   const [regexMode, setRegexMode] = useState(false);
   const [paused, setPaused] = useState(false);
   const [severityFilter, setSeverityFilter] = useState<string[]>(['INFO', 'WARN', 'ERROR']);
+  const [selectedPodForLogs, setSelectedPodForLogs] = useState<string | null>(null);
+
+  // Quick Action States
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [execCommand, setExecCommand] = useState('');
+  const [execOutput, setExecOutput] = useState<string | null>(null);
+  const [portForwardPort, setPortForwardPort] = useState(8080);
+  const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   const selectedTab = activeTab || internalTab;
   const setSelectedTab = onTabChange || setInternalTab;
@@ -90,6 +103,14 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
     if (blastFocus) return [...blastFocus.incoming, ...blastFocus.outgoing];
     return [...incomingEdges, ...outgoingEdges];
   }, [blastFocus, incomingEdges, outgoingEdges]);
+
+  const associatedPods = useMemo(() => {
+    if (nodeType === 'pod') return [nodeData];
+    // Find all structural edges where target is this service node and source is a pod
+    const podEdges = edges.filter(e => e.target === nodeId && e.source.startsWith('pod-'));
+    const podIds = new Set(podEdges.map(e => e.source));
+    return nodes.filter(n => n.data?.type === 'pod' && podIds.has(n.id));
+  }, [nodeType, nodeData, edges, nodeId, nodes]);
 
   const metrics = useMemo(() => {
     const durations = connectedEdges.map((edge) => safeNumber(edge.data?.durationMs)).filter((value) => value > 0);
@@ -182,12 +203,18 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
       </div>
 
       <div className="px-5 pt-4">
-        <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/8 bg-white/4 p-1">
+        <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/8 bg-white/4 p-1">
           <button
             onClick={() => setSelectedTab('telemetry')}
             className={`rounded-xl px-3 py-2 text-sm transition-all ${selectedTab === 'telemetry' ? 'bg-primary/15 text-primary-fixed' : 'text-outline-variant hover:bg-white/5 hover:text-on-surface'}`}
           >
             Telemetry & Traffic
+          </button>
+          <button
+            onClick={() => setSelectedTab('pods')}
+            className={`rounded-xl px-3 py-2 text-sm transition-all ${selectedTab === 'pods' ? 'bg-primary/15 text-primary-fixed' : 'text-outline-variant hover:bg-white/5 hover:text-on-surface'}`}
+          >
+            Associated Pods
           </button>
           <button
             onClick={() => setSelectedTab('logs')}
@@ -204,7 +231,7 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
             {hasMismatch && (
               <div className="mb-4 rounded-2xl border border-error/25 bg-error/10 p-4 text-sm text-error">
                 <div className="flex items-center gap-2 font-semibold">
-                    <WarningAmberIcon fontSize="small" /> L4/L7 mismatch risk
+                  <WarningAmberIcon fontSize="small" /> L4/L7 mismatch risk
                 </div>
                 <div className="mt-2 text-xs text-error/90">
                   TCP reachability exists, but L7 parsing or contract validation is failing on one or more paths.
@@ -313,6 +340,31 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
               </div>
             )}
           </>
+        ) : selectedTab === 'pods' ? (
+          <>
+            <div className="mb-4 rounded-2xl border border-white/8 bg-surface-container-low/30 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <Typography variant="label" className="text-outline-variant">Associated Pods ({associatedPods.length})</Typography>
+              </div>
+              <div className="space-y-2">
+                {associatedPods.length > 0 ? associatedPods.map((pod) => (
+                  <div key={pod.id} className="rounded-xl border border-white/8 bg-white/4 p-3 text-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-on-surface truncate">{pod.data?.label || pod.id}</div>
+                      <div className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider ${pod.data?.status === 'Running' ? 'bg-emerald-400/20 text-emerald-300' :
+                        pod.data?.status === 'Pending' ? 'bg-amber-400/20 text-amber-300' :
+                          'bg-error/20 text-error'
+                        }`}>
+                        {pod.data?.status || 'Unknown'}
+                      </div>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="text-sm text-outline-variant">No pods found for this service.</div>
+                )}
+              </div>
+            </div>
+          </>
         ) : (
           <>
             <div className="mb-4 rounded-2xl border border-white/8 bg-surface-container-low/30 p-4">
@@ -375,17 +427,121 @@ export const ActionPanel: React.FC<ActionPanelProps> = ({
 
         <div className="mb-6">
           <Typography variant="label" className="mb-3 block text-outline-variant">Quick Actions</Typography>
+
+          {actionMessage && (
+            <div className={`mb-3 p-2 rounded text-xs ${actionMessage.type === 'error' ? 'bg-error/20 text-error' : 'bg-emerald-400/20 text-emerald-300'}`}>
+              {actionMessage.text}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
-            <Button variant="ghost" size="sm" className="w-full text-error border-error/20 hover:bg-error/10 hover:text-error">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-error border-error/20 hover:bg-error/10 hover:text-error"
+              onClick={async () => {
+                try {
+                  setActionMessage(null);
+                  if (nodeType === 'service') {
+                    await apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/services/${nodeLabel}`, { method: 'DELETE' });
+                    setActionMessage({ type: 'success', text: `Service ${nodeLabel} deleted` });
+                  } else {
+                    await apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/pods/${nodeLabel}`, { method: 'DELETE' });
+                    setActionMessage({ type: 'success', text: `Pod ${nodeLabel} restarting` });
+                  }
+                } catch (err: any) {
+                  setActionMessage({ type: 'error', text: err.message });
+                }
+              }}
+            >
               {nodeType === 'service' ? 'Delete Service' : 'Restart Pod'}
             </Button>
-            <Button variant="ghost" size="sm" className="w-full">
-              <PlayArrowIcon fontSize="inherit" className="mr-1" /> Port-Forward
-            </Button>
+
             {nodeType === 'pod' && (
-              <Button variant="ghost" size="sm" className="w-full col-span-2">
-                <TerminalIcon fontSize="inherit" className="mr-1" /> Execute Shell
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full"
+                onClick={async () => {
+                  try {
+                    const port = prompt('Enter target port on pod to forward to:', '8080');
+                    if (!port) return;
+                    setActionMessage(null);
+                    const res = await apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/pods/${nodeLabel}/portforward`, {
+                      method: 'POST',
+                      body: JSON.stringify({ targetPort: parseInt(port, 10) })
+                    });
+                    setActionMessage({ type: 'success', text: res.message });
+                  } catch (err: any) {
+                    setActionMessage({ type: 'error', text: err.message });
+                  }
+                }}
+              >
+                <PlayArrowIcon fontSize="inherit" className="mr-1" /> Port-Forward
               </Button>
+            )}
+
+            {nodeType === 'pod' && (
+              <div className="col-span-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => {
+                    setIsExecuting(!isExecuting);
+                    setExecOutput(null);
+                  }}
+                >
+                  <TerminalIcon fontSize="inherit" className="mr-1" /> Execute Shell
+                </Button>
+
+                {isExecuting && (
+                  <div className="mt-3 p-3 bg-black/40 border border-white/10 rounded-xl">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="ls -la /"
+                        className="flex-1 bg-surface-container-low border border-white/10 rounded px-2 py-1 text-xs text-on-surface"
+                        value={execCommand}
+                        onChange={e => setExecCommand(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter' && execCommand) {
+                            try {
+                              setExecOutput('Running...');
+                              const res = await apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/pods/${nodeLabel}/exec`, {
+                                method: 'POST',
+                                body: JSON.stringify({ command: execCommand })
+                              });
+                              setExecOutput(res.output);
+                            } catch (err: any) {
+                              setExecOutput(`Error: ${err.message}`);
+                            }
+                          }
+                        }}
+                      />
+                      <Button size="sm" variant="primary" onClick={async () => {
+                        if (execCommand) {
+                          try {
+                            setExecOutput('Running...');
+                            const res = await apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/pods/${nodeLabel}/exec`, {
+                              method: 'POST',
+                              body: JSON.stringify({ command: execCommand })
+                            });
+                            setExecOutput(res.output);
+                          } catch (err: any) {
+                            setExecOutput(`Error: ${err.message}`);
+                          }
+                        }
+                      }}>Run</Button>
+                    </div>
+                    {execOutput && (
+                      <pre className="mt-2 p-2 bg-black text-emerald-400 font-mono text-[10px] overflow-auto max-h-40 rounded">
+                        {execOutput}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>

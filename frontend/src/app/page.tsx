@@ -272,18 +272,14 @@ export default function Home() {
   const [logs, setLogs] = useState<string[]>([]);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [showPods, setShowPods] = useState(false);
   const [blastRadiusMode, setBlastRadiusMode] = useState(false);
   const [timeTravelMinutes, setTimeTravelMinutes] = useState(0);
   const [graphHistory, setGraphHistory] = useState<{ ts: string; nodes: any[]; edges: any[] }[]>([]);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [focusNodeIds, setFocusNodeIds] = useState<string[]>([]);
   const [focusEdgeIds, setFocusEdgeIds] = useState<string[]>([]);
-  const [activeDrawerTab, setActiveDrawerTab] = useState<'telemetry' | 'logs'>('telemetry');
+  const [activeDrawerTab, setActiveDrawerTab] = useState<'telemetry' | 'logs' | 'pods'>('telemetry');
   const graphStateRef = useRef<{ nodes: any[]; edges: any[] }>({ nodes: [], edges: [] });
-
-  // Filter nodes based on showPods toggle
-  const nodes = showPods ? allNodes : allNodes.filter((n) => n.data?.type !== 'pod');
 
   const recordSnapshot = useCallback((nextNodes: any[], nextEdges: any[]) => {
     const snapshot = cloneGraph(nextNodes, nextEdges);
@@ -330,7 +326,7 @@ export default function Home() {
 
   const displayNodes = useMemo(() => {
     return visibleSnapshot.nodes
-      .filter((node) => showPods || node.data?.type !== 'pod')
+      .filter((node) => node.data?.type !== 'pod')
       .map((node) => {
         const isFocused = !highlightedNodes || highlightedNodes.has(node.id);
         const opacity = blastRadiusMode && focusNodeId && !isFocused ? 0.18 : 1;
@@ -345,10 +341,12 @@ export default function Home() {
           selected: node.id === focusNodeId,
         };
       });
-  }, [blastRadiusMode, focusNodeId, highlightedNodes, showPods, visibleSnapshot.nodes]);
+  }, [blastRadiusMode, focusNodeId, highlightedNodes, visibleSnapshot.nodes]);
 
   const displayEdges = useMemo(() => {
-    return visibleSnapshot.edges.map((edge) => {
+    return visibleSnapshot.edges
+      .filter((edge) => !edge.id.startsWith('e-pod-')) // Remove structural edges connecting pods
+      .map((edge) => {
       const isFocused = !highlightedEdges || highlightedEdges.has(edge.id);
       const muted = blastRadiusMode && focusNodeId && !isFocused;
       const endpointLabel = edge.data?.endpoint || edge.label;
@@ -385,8 +383,8 @@ export default function Home() {
   }, [blastFocus.downstream.size, blastFocus.upstream.size, focusNodeId, visibleSnapshot.edges, visibleSnapshot.nodes]);
 
   const graphFitKey = useMemo(() => {
-    return `${showPods ? 'pods-on' : 'pods-off'}-${timeTravelMinutes}-${visibleSnapshot.nodes.length}-${visibleSnapshot.edges.length}`;
-  }, [showPods, timeTravelMinutes, visibleSnapshot.nodes.length, visibleSnapshot.edges.length]);
+    return `pods-off-${timeTravelMinutes}-${visibleSnapshot.nodes.length}-${visibleSnapshot.edges.length}`;
+  }, [timeTravelMinutes, visibleSnapshot.nodes.length, visibleSnapshot.edges.length]);
 
   useEffect(() => {
     // Artificial delay to show the awesome splash screen
@@ -644,16 +642,6 @@ export default function Home() {
                 {blastRadiusMode ? 'Blast Radius ON' : 'Blast Radius OFF'}
               </button>
 
-              <label className="flex items-center gap-2 px-4 py-2 rounded-2xl border border-white/8 bg-white/5 text-sm text-on-surface">
-                <input
-                  type="checkbox"
-                  checked={showPods}
-                  onChange={(e) => setShowPods(e.target.checked)}
-                  className="w-4 h-4 accent-primary"
-                />
-                Show Pod Details
-              </label>
-
               <div className="px-4 py-2 rounded-2xl border border-white/8 bg-white/5 text-xs text-outline-variant">
                 {visibleSnapshot.ts ? `View: ${new Date(visibleSnapshot.ts).toLocaleTimeString()}` : 'Live view'}
               </div>
@@ -723,6 +711,7 @@ export default function Home() {
           podName={selectedPodName || selectedNode?.data?.label || ''}
           logs={logs}
           nodeData={selectedNode}
+          nodes={visibleSnapshot.nodes} // Pass full un-filtered nodes to ActionPanel
           edges={visibleSnapshot.edges}
           activeTab={activeDrawerTab}
           onTabChange={setActiveDrawerTab}

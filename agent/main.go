@@ -50,7 +50,7 @@ type bpfHttpEvent struct {
 	Daddr   uint32
 	Dport   uint16
 	Sport   uint16
-	Payload [256]byte
+	Payload [1024]byte
 }
 
 var telemetryQueue = make(chan TelemetryPayload, 256)
@@ -216,6 +216,8 @@ func main() {
 
 		rawPayload := string(bytes.Trim(event.Payload[:], "\x00"))
 		method, path, fullURL, parsedHeaders, isResponse, respStatus, respHeaders, respBody := parseHTTPMessage(rawPayload)
+		reqKey := fmt.Sprintf("%s-%s-%d-%d", srcIp, dstIp, event.Sport, event.Dport)
+
 		// If this is a response packet, emit telemetry containing status and response headers
 		if isResponse {
 			// Prevent infinite loop by ignoring our own telemetry responses
@@ -223,7 +225,31 @@ func main() {
 				continue
 			}
 
-			if shouldSkipTelemetry(path, fullURL, dport, dstIp.String()) {
+			// Retrieve original request info if available
+			reqMap.Lock()
+			origReq, hasReq := reqMap.m[reqKey]
+			if hasReq {
+				delete(reqMap.m, reqKey)
+			}
+			reqMap.Unlock()
+
+			// Use original path/url if we have it, else what we parsed (which might be empty for responses)
+			finalPath := path
+			finalMethod := method
+			finalURL := fullURL
+			if hasReq {
+				if finalPath == "" {
+					finalPath = origReq.tpath
+				}
+				if finalMethod == "" {
+					finalMethod = origReq.tmethod
+				}
+				if finalURL == "" {
+					finalURL = origReq.turl
+				}
+			}
+
+			if shouldSkipTelemetry(finalPath, finalURL, dport, dstIp.String()) {
 				continue
 			}
 
@@ -233,6 +259,9 @@ func main() {
 				SourceIp: srcIp.String(),
 				DestIp:   dstIp.String(),
 				DestPort: dport,
+				Method:   finalMethod,
+				Path:     finalPath,
+				URL:      finalURL,
 				StatusCode: respStatus,
 				ResponseHeaders: respHeaders,
 				ResponseBody: respBody,
@@ -253,6 +282,17 @@ func main() {
 		if shouldSkipTelemetry(path, fullURL, dport, dstIp.String()) {
 			continue
 		}
+
+		// Save request info for correlation
+		reqMap.Lock()
+		reqMap.m[reqKey] = requestInfo{
+			ts:       time.Now(),
+			tmethod:  method,
+			tpath:    path,
+			turl:     fullURL,
+			theaders: parsedHeaders,
+		}
+		reqMap.Unlock()
 
 		log.Printf("HTTP Intercept: %s %s -> %s:%d %s", method, srcIp, dstIp, dport, path)
 

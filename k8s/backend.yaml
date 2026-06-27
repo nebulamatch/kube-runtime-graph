@@ -76,8 +76,7 @@ metadata:
   name: kube-runtime-graph-backend
   namespace: kube-system
 spec:
-  type: ClusterIP
-  clusterIP: None
+  type: LoadBalancer
   selector:
     app: kube-runtime-graph-backend
   ports:

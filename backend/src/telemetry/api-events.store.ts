@@ -2,6 +2,8 @@ export interface ApiTraceRecord {
   id: string;
   timestamp: string;
   namespace: string;
+  sourceNamespace?: string;
+  destNamespace?: string;
   method?: string;
   path?: string;
   url?: string;
@@ -88,7 +90,7 @@ export class ApiEventsStore {
 
   static listByNamespace(namespace: string, limit = 300): ApiTraceRecord[] {
     const filtered = this.records
-      .filter((record) => record.namespace === namespace)
+      .filter((record) => record.namespace === namespace || record.sourceNamespace === namespace || record.destNamespace === namespace)
       .filter((record) => this.isServiceTrace(record))
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return filtered.slice(0, limit);

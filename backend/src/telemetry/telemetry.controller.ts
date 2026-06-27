@@ -100,6 +100,8 @@ export class TelemetryController {
           id: `trace-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           timestamp: new Date().toISOString(),
           namespace,
+          sourceNamespace: resultData?.sourceNamespace,
+          destNamespace: resultData?.destNamespace,
           method: payload.method,
           path: payload.path,
           url: payload.url || payload.path,
@@ -118,6 +120,16 @@ export class TelemetryController {
           destPod,
           analysis,
         });
+
+        if (analysis && (analysis.severity === 'warning' || analysis.severity === 'error')) {
+          this.graphGateway.server.emit('notification', {
+            id: `notif-${Date.now()}`,
+            title: analysis.summary,
+            message: `${sourceService || 'Unknown client'} -> ${destService || 'Unknown service'}: ${endpoint || 'Unknown endpoint'}`,
+            type: analysis.severity,
+            serviceId: destService
+          });
+        }
       }
     } catch {
       // best-effort only

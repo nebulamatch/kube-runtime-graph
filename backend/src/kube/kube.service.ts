@@ -2,6 +2,10 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import * as k8s from '@kubernetes/client-node';
 import * as stream from 'stream';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 interface CacheEntry<T> {
   ts: number;
@@ -263,6 +267,68 @@ export class KubeService {
         `Failed to list RBAC: ${error?.message || JSON.stringify(error)}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+
+  async deleteService(contextName: string, namespace: string, serviceName: string) {
+    try {
+      const kc = this.loadConfig(contextName);
+      const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
+      await k8sApi.deleteNamespacedService(serviceName, namespace);
+      return { success: true, message: `Service ${serviceName} deleted successfully` };
+    } catch (error: any) {
+      throw new HttpException(
+        `Failed to delete service: ${error?.message || JSON.stringify(error)}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async deletePod(contextName: string, namespace: string, podName: string) {
+    try {
+      const kc = this.loadConfig(contextName);
+      const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
+      await k8sApi.deleteNamespacedPod(podName, namespace);
+      return { success: true, message: `Pod ${podName} restarted (deleted) successfully` };
+    } catch (error: any) {
+      throw new HttpException(
+        `Failed to restart pod: ${error?.message || JSON.stringify(error)}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async execCommand(contextName: string, namespace: string, podName: string, command: string) {
+    try {
+      // For simplicity, we use kubectl via child_process
+      const cmd = `kubectl exec -n ${namespace} ${podName} -- ${command || 'echo "Connected"'}`;
+      const { stdout, stderr } = await execAsync(cmd, { timeout: 10000 });
+      return { success: true, output: stdout || stderr };
+    } catch (error: any) {
+      return { success: false, output: error?.stderr || error?.message || 'Command failed' };
+    }
+  }
+
+  async portForward(contextName: string, namespace: string, podName: string, targetPort: number) {
+    try {
+      // Find a random available local port between 10000 and 20000
+      const localPort = Math.floor(Math.random() * 10000) + 10000;
+      const cmd = `kubectl port-forward -n ${namespace} ${podName} ${localPort}:${targetPort}`;
+      
+      // We spawn it but don't await its completion since it blocks. 
+      // In a real app we'd track the PID and allow closing it.
+      exec(cmd);
+      
+      // Wait 1 second to let it establish
+      await new Promise(r => setTimeout(r, 1000));
+      return { 
+        success: true, 
+        message: `Port forwarding started. Access it at localhost:${localPort}`,
+        localPort,
+        targetPort
+      };
+    } catch (error: any) {
+      return { success: false, message: `Failed to start port-forwarding: ${error?.message}` };
     }
   }
 }
