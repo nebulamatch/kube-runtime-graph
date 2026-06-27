@@ -226,10 +226,11 @@ func main() {
 			}
 
 			// Retrieve original request info if available
+			lookupKey := fmt.Sprintf("%s-%s-%d-%d", dstIp, srcIp, event.Dport, event.Sport)
 			reqMap.Lock()
-			origReq, hasReq := reqMap.m[reqKey]
+			origReq, hasReq := reqMap.m[lookupKey]
 			if hasReq {
-				delete(reqMap.m, reqKey)
+				delete(reqMap.m, lookupKey)
 			}
 			reqMap.Unlock()
 
@@ -249,16 +250,19 @@ func main() {
 				}
 			}
 
-			if shouldSkipTelemetry(finalPath, finalURL, dport, dstIp.String()) {
+			// Original server port is in event.Sport (network byte order) for a response
+			serverPort := (event.Sport >> 8) | (event.Sport << 8)
+
+			if shouldSkipTelemetry(finalPath, finalURL, serverPort, srcIp.String()) {
 				continue
 			}
 
-			log.Printf("HTTP Response Intercept: %s -> %s:%d status=%d", srcIp, dstIp, dport, respStatus)
+			log.Printf("HTTP Response Intercept: %s -> %s:%d status=%d", dstIp, srcIp, serverPort, respStatus)
 
 			payload := TelemetryPayload{
-				SourceIp: srcIp.String(),
-				DestIp:   dstIp.String(),
-				DestPort: dport,
+				SourceIp: dstIp.String(),
+				DestIp:   srcIp.String(),
+				DestPort: serverPort,
 				Method:   finalMethod,
 				Path:     finalPath,
 				URL:      finalURL,
@@ -296,6 +300,9 @@ func main() {
 
 		log.Printf("HTTP Intercept: %s %s -> %s:%d %s", method, srcIp, dstIp, dport, path)
 
+		// DO NOT emit telemetry here, wait for the response to avoid duplicate rows
+		// in the UI and to ensure we have the status code.
+		/*
 		payload := TelemetryPayload{
 			SourceIp: srcIp.String(),
 			DestIp:   dstIp.String(),
@@ -306,6 +313,7 @@ func main() {
 			Headers:  parsedHeaders,
 		}
 		enqueueTelemetry(payload)
+		*/
 	}
 }
 
