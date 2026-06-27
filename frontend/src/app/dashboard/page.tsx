@@ -33,17 +33,28 @@ export default function Dashboard() {
         const data = await apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/services`);
         setServices(data || []);
         
-        const newMetrics: Record<string, MetricData> = {};
-        (data || []).forEach((svc: any) => {
-          const history = Array.from({ length: 12 }, () => Math.floor(Math.random() * 80) + 20);
-          newMetrics[svc.name] = {
-            rps: Math.floor(Math.random() * 200) + 10,
-            errorRate: Math.floor(Math.random() * 5),
-            p99: Math.floor(Math.random() * 150) + 15,
-            history
-          };
-        });
-        setMetrics(newMetrics);
+        try {
+          const metricsData = await apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/metrics`);
+          // Ensure every service has at least empty metrics if none returned
+          const newMetrics: Record<string, MetricData> = {};
+          (data || []).forEach((svc: any) => {
+            newMetrics[svc.name] = metricsData[svc.name] || {
+              rps: 0,
+              errorRate: 0,
+              p99: 0,
+              history: Array(12).fill(0)
+            };
+          });
+          setMetrics(newMetrics);
+        } catch (metricsErr) {
+          console.error('Failed to load metrics', metricsErr);
+          // Fallback to empty if error
+          const newMetrics: Record<string, MetricData> = {};
+          (data || []).forEach((svc: any) => {
+            newMetrics[svc.name] = { rps: 0, errorRate: 0, p99: 0, history: Array(12).fill(0) };
+          });
+          setMetrics(newMetrics);
+        }
       } catch (err) {
         console.error('Failed to load services', err);
       } finally {

@@ -41,6 +41,7 @@ const layoutTopToBottom = (nodes: any[], edges: any[]): any[] => {
 
   const queue: string[] = [];
   const level = new Map<string, number>();
+  let unprocessedCount = inDegree.size;
 
   inDegree.forEach((degree, nodeId) => {
     if (degree === 0) {
@@ -49,13 +50,39 @@ const layoutTopToBottom = (nodes: any[], edges: any[]): any[] => {
     }
   });
 
-  while (queue.length > 0) {
+  while (unprocessedCount > 0) {
+    if (queue.length === 0) {
+      // Cycle detected, break it by taking the node with minimum remaining in-degree
+      let minNode: string | null = null;
+      let minDegree = Infinity;
+      inDegree.forEach((degree, nodeId) => {
+        if (degree > 0 && degree < minDegree) {
+          minDegree = degree;
+          minNode = nodeId;
+        }
+      });
+      if (minNode) {
+        queue.push(minNode);
+        if (!level.has(minNode)) level.set(minNode, 0);
+      } else {
+        break; 
+      }
+    }
+
     const node = queue.shift()!;
+    unprocessedCount--;
+    inDegree.set(node, -1); // Mark as processed
+
     adj.get(node)?.forEach((child) => {
-      const childLevel = (level.get(node) || 0) + 1;
-      level.set(child, Math.max(level.get(child) || 0, childLevel));
-      inDegree.set(child, (inDegree.get(child) || 0) - 1);
-      if (inDegree.get(child) === 0) queue.push(child);
+      const childDegree = inDegree.get(child);
+      if (childDegree !== undefined && childDegree > 0) {
+        const childLevel = (level.get(node) || 0) + 1;
+        level.set(child, Math.max(level.get(child) || 0, childLevel));
+        inDegree.set(child, childDegree - 1);
+        if (inDegree.get(child) === 0) {
+          queue.push(child);
+        }
+      }
     });
   }
 
