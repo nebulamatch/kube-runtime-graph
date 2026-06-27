@@ -266,6 +266,7 @@ func main() {
 				Method:   finalMethod,
 				Path:     finalPath,
 				URL:      finalURL,
+				Headers:  origReq.theaders,
 				StatusCode: respStatus,
 				ResponseHeaders: respHeaders,
 				ResponseBody: respBody,
