@@ -22,9 +22,7 @@ export interface Edge {
   source: string;
   target: string;
   animated: boolean;
-  label?: string;
   style?: any;
-  data?: any;
 }
 
 @Injectable()
@@ -44,13 +42,6 @@ export class GraphService {
   private traceLastNode: Map<string, string> = new Map();
   private lastResolveAt = 0;
   private lastResolveErrorAt = 0;
-
-  private readonly loopbackPattern = /^(127\.0\.0\.1|localhost|::1)$/i;
-
-  private sanitizeId(s?: string): string {
-    if (!s) return '';
-    return String(s).replace(/[^a-zA-Z0-9-_:.]/g, '_').slice(0, 120);
-  }
 
   private invalidateGraphCache() {
     this.graphCache.clear();
@@ -258,34 +249,13 @@ export class GraphService {
       this.serviceIpCache.clear();
       this.ipToNamespaceCache.clear();
 
-      // Fetch ALL Services globally to populate IP caches for all namespaces
-      const allServicesRes: any = await k8sApi.listServiceForAllNamespaces();
-      const allServicesItems = allServicesRes.body ? allServicesRes.body.items : allServicesRes.items;
+      // Fetch Services
+      const servicesRes: any = await k8sApi.listNamespacedService(namespace);
+      const servicesItems = servicesRes.body ? servicesRes.body.items : servicesRes.items;
       
-      // Fetch ALL Pods globally to populate IP caches for all namespaces
-      const allPodsRes: any = await k8sApi.listPodForAllNamespaces();
-      const allPodsItems = allPodsRes.body ? allPodsRes.body.items : allPodsRes.items;
-
-      // Populate global caches
-      allServicesItems.forEach((svc: any) => {
-        const svcId = `svc-${svc.metadata.name}`;
-        const svcClusterIp = svc.spec?.clusterIP;
-        if (svcClusterIp && svcClusterIp !== 'None') {
-          this.serviceIpCache.set(svcClusterIp, svcId);
-          this.ipToServiceCache.set(svcClusterIp, svcId);
-          if (svc.metadata?.namespace) this.ipToNamespaceCache.set(svcClusterIp, svc.metadata.namespace);
-        }
-      });
-      allPodsItems.forEach((pod: any) => {
-        if (pod.status?.podIP) {
-          this.podCache.set(pod.status.podIP, `pod-${pod.metadata.name}`);
-          if (pod.metadata?.namespace) this.ipToNamespaceCache.set(pod.status.podIP, pod.metadata.namespace);
-        }
-      });
-
-      // Only draw the ones in the selected namespace by default
-      const servicesItems = allServicesItems.filter((s: any) => s.metadata?.namespace === namespace);
-      const podsItems = allPodsItems.filter((p: any) => p.metadata?.namespace === namespace);
+      // Fetch Pods
+      const podsRes: any = await k8sApi.listNamespacedPod(namespace);
+      const podsItems = podsRes.body ? podsRes.body.items : podsRes.items;
 
       const nodes: Node[] = [];
       const edges: Edge[] = [];
@@ -473,39 +443,8 @@ export class GraphService {
 
       // Inject active telemetry edges
       Array.from(this.activeEdges.values()).forEach(edge => {
-        let sourceExists = nodes.some(n => n.id === edge.source);
+        const sourceExists = nodes.some(n => n.id === edge.source);
         const targetExists = nodes.some(n => n.id === edge.target);
-
-        // If source node is from another namespace or dynamically discovered, add it to the graph
-        if (!sourceExists) {
-          let label = edge.source;
-          const originService = edge.data?.originService;
-          const sourceNamespace = this.ipToNamespaceCache.get(edge.data?.sourceIp || '') || edge.data?.sourceNamespace;
-
-          if (sourceNamespace && sourceNamespace !== namespace) {
-             const name = originService && originService !== 'unknown' ? originService : edge.source.replace(/^(svc|pod|ext)-/, '');
-             label = `Client: ${name} (${sourceNamespace})`;
-          } else if (originService && originService !== 'unknown') {
-             label = originService;
-          } else if (edge.source.startsWith('ext-')) {
-             label = edge.source.replace('ext-', 'Client: ');
-          }
-
-          nodes.push({
-            id: edge.source,
-            type: 'custom',
-            position: { x: centerX - 400 + Math.random() * 200, y: startY - 200 + Math.random() * 100 },
-            data: {
-              label,
-              type: 'external',
-              rps: 0,
-              latency: '0ms',
-              errorRate: 0,
-            }
-          });
-          sourceExists = true;
-        }
-
         if (sourceExists && targetExists) {
           edges.push(edge);
         }
@@ -580,10 +519,6 @@ export class GraphService {
       }
     }
 
-    if (!sourceNodeId && payload.sourceIp && !this.loopbackPattern.test(payload.sourceIp)) {
-      sourceNodeId = `ext-${this.sanitizeId(payload.sourceIp)}`;
-    }
-
     if (sourceNodeId && destNodeId) {
       // Extract source service name if source is a pod
       const sourceServiceId = this.ipToServiceCache.get(payload.sourceIp);
@@ -604,6 +539,12 @@ export class GraphService {
         topologyChanged = targets.size > before;
       }
 
+      // Helper: sanitize label parts to safe node ids
+      const sanitizeId = (s?: string) => {
+        if (!s) return '';
+        return String(s).replace(/[^a-zA-Z0-9-_:.]/g, '_').slice(0, 120);
+      };
+
       const syntheticNewNodes: Node[] = [];
 
       // If upstream forwarded-for header exists and indicates an external origin
@@ -612,7 +553,7 @@ export class GraphService {
         const upstream = String(forwardedFor).split(',')[0].trim();
         // If upstream differs from the immediate source, create a synthetic external node
         if (upstream && upstream !== payload.sourceIp) {
-          const extId = `ext-${this.sanitizeId(upstream)}`;
+          const extId = `ext-${sanitizeId(upstream)}`;
           if (!this.discoveredDbs.has(extId)) {
             const extNode: Node = {
               id: extId,
@@ -627,7 +568,7 @@ export class GraphService {
               },
             };
             this.discoveredDbs.set(extId, extNode); // reuse discoveredDbs map for lightweight synthetic nodes
-            newNodes.push(extNode);
+            syntheticNewNodes.push(extNode);
           }
 
           // Create an active edge from external origin -> sourceNodeId (if sourceNodeId exists)
