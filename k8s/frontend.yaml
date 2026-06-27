@@ -24,8 +24,8 @@ spec:
         ports:
         - containerPort: 3000
         env:
-        - name: NEXT_PUBLIC_BACKEND_URL
-          value: "http://localhost:3001"
+        - name: BACKEND_URL
+          value: "http://kube-runtime-graph-backend.kube-system.svc.cluster.local:3001"
 ---
 apiVersion: v1
 kind: Service
