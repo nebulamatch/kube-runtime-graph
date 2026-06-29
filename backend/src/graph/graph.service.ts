@@ -417,6 +417,10 @@ export class GraphService {
     responseBody?: string;
     durationMs?: number;
   }) {
+    if (!payload.sourceIp || !payload.destIp || payload.sourceIp === '0.0.0.0' || payload.destIp === '0.0.0.0') {
+      return null;
+    }
+
     // ── Drop known Kubernetes system ports that are never application traffic ──
     const SYSTEM_PORTS = new Set([
       9153,  // CoreDNS metrics
