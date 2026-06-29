@@ -521,14 +521,39 @@ export class GraphService {
 
     const newNodes: Node[] = [];
 
-    // DB Heuristic
+    if (!sourceNodeId) {
+      sourceNodeId = `ext-${payload.sourceIp}`;
+      if (!this.discoveredDbs.has(sourceNodeId)) {
+        const extNode: Node = {
+          id: sourceNodeId,
+          type: 'custom',
+          position: { x: Math.random() * 800, y: Math.random() * 200 },
+          data: {
+            label: payload.sourceIp,
+            type: 'external',
+            rps: 0,
+            latency: '0ms',
+            errorRate: 0,
+          }
+        };
+        this.discoveredDbs.set(sourceNodeId, extNode);
+        newNodes.push(extNode);
+      }
+    }
+
+    // DB and External Heuristics
     if (!destNodeId) {
+      const hostHeader = payload.headers?.['host'] || payload.headers?.['origin'] || '';
+      const isSupabase = hostHeader.includes('supabase') || (payload.url || '').includes('supabase');
+
       if (payload.destPort === 5432) destNodeId = `db-postgres-${payload.destIp}`;
       else if (payload.destPort === 3306) destNodeId = `db-mysql-${payload.destIp}`;
       else if (payload.destPort === 27017) destNodeId = `db-mongo-${payload.destIp}`;
       else if (payload.destPort === 6379) destNodeId = `db-redis-${payload.destIp}`;
+      else if ((payload.destPort === 443 || payload.destPort === 80) && isSupabase) destNodeId = `db-supabase-${payload.destIp}`;
+      else destNodeId = `ext-${payload.destIp}`;
       
-      if (destNodeId) {
+      if (destNodeId.startsWith('db-')) {
         this.ipToDbCache.set(payload.destIp, destNodeId);
         if (!this.discoveredDbs.has(destNodeId)) {
           const dbNode: Node = {
@@ -545,6 +570,23 @@ export class GraphService {
           };
           this.discoveredDbs.set(destNodeId, dbNode);
           newNodes.push(dbNode);
+        }
+      } else {
+        if (!this.discoveredDbs.has(destNodeId)) {
+          const extNode: Node = {
+            id: destNodeId,
+            type: 'custom',
+            position: { x: Math.random() * 800, y: Math.random() * 200 },
+            data: {
+              label: payload.destIp,
+              type: 'external',
+              rps: 0,
+              latency: '0ms',
+              errorRate: 0,
+            }
+          };
+          this.discoveredDbs.set(destNodeId, extNode);
+          newNodes.push(extNode);
         }
       }
     }

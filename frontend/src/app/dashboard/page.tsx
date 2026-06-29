@@ -19,46 +19,49 @@ export default function Dashboard() {
   const { selectedContext, selectedNamespace } = useKubeGlobal();
   const [services, setServices] = useState<any[]>([]);
   const [metrics, setMetrics] = useState<Record<string, MetricData>>({});
+  const [pods, setPods] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!selectedContext || !selectedNamespace) return;
     
-    const fetchServices = async () => {
-      setIsLoading(true);
+    let isMounted = true;
+    const fetchData = async () => {
       try {
-        const data = await apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/services`);
-        setServices(data || []);
+        const [servicesData, metricsData, podsData] = await Promise.all([
+          apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/services`),
+          apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/metrics`),
+          apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/pods`)
+        ]);
+
+        if (!isMounted) return;
+
+        setServices(servicesData || []);
         
-        try {
-          const metricsData = await apiFetch(`/kube/contexts/${selectedContext}/namespaces/${selectedNamespace}/metrics`);
-          // Ensure every service has at least empty metrics if none returned
-          const newMetrics: Record<string, MetricData> = {};
-          (data || []).forEach((svc: any) => {
-            newMetrics[svc.name] = metricsData[svc.name] || {
-              rps: 0,
-              errorRate: 0,
-              p99: 0,
-              history: Array(12).fill(0)
-            };
-          });
-          setMetrics(newMetrics);
-        } catch (metricsErr) {
-          console.error('Failed to load metrics', metricsErr);
-          // Fallback to empty if error
-          const newMetrics: Record<string, MetricData> = {};
-          (data || []).forEach((svc: any) => {
-            newMetrics[svc.name] = { rps: 0, errorRate: 0, p99: 0, history: Array(12).fill(0) };
-          });
-          setMetrics(newMetrics);
-        }
+        const newMetrics: Record<string, MetricData> = {};
+        (servicesData || []).forEach((svc: any) => {
+          newMetrics[svc.name] = (metricsData && metricsData[svc.name]) || {
+            rps: 0,
+            errorRate: 0,
+            p99: 0,
+            history: Array(12).fill(0)
+          };
+        });
+        setMetrics(newMetrics);
+        setPods(podsData || []);
       } catch (err) {
-        console.error('Failed to load services', err);
+        console.error('Failed to load dashboard data', err);
       } finally {
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       }
     };
-    fetchServices();
+
+    fetchData();
+    const interval = setInterval(fetchData, 3000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [selectedContext, selectedNamespace]);
 
   // Enterprise Sparkline using Recharts
@@ -74,7 +77,7 @@ export default function Dashboard() {
                 <stop offset="95%" stopColor={color} stopOpacity={0}/>
               </linearGradient>
             </defs>
-            <Tooltip content={<></>} cursor={false} />
+            <Tooltip content={() => null} cursor={false} />
             <Area type="monotone" dataKey="value" stroke={color} fillOpacity={1} fill={`url(#color-${color})`} isAnimationActive={false} />
           </AreaChart>
         </ResponsiveContainer>
@@ -174,7 +177,40 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <div className="mt-2 pt-4 border-t border-white/10">
+                  <div className="mt-auto pt-4 border-t border-white/10">
+                    <div className="text-[10px] uppercase tracking-wider text-outline mb-2">Realtime Pod Status</div>
+                    <div className="flex flex-wrap gap-2">
+                      {pods.filter(pod => {
+                         if (svc.selector && Object.keys(svc.selector).length > 0) {
+                           return Object.keys(svc.selector).every(k => pod.labels[k] === svc.selector[k]);
+                         }
+                         return pod.name.startsWith(svc.name);
+                      }).map(pod => {
+                         let pColor = 'bg-emerald-400/20 text-emerald-400 border-emerald-400/30';
+                         const st = pod.status || 'Unknown';
+                         if (st === 'Pending' || st === 'ContainerCreating' || st === 'Initializing') pColor = 'bg-amber-400/20 text-amber-400 border-amber-400/30';
+                         else if (st === 'Failed' || st === 'CrashLoopBackOff' || st === 'Error') pColor = 'bg-error/20 text-error border-error/30';
+                         else if (st !== 'Running') pColor = 'bg-primary/20 text-primary border-primary/30';
+
+                         return (
+                           <div key={pod.name} className={`px-2 py-1 rounded border text-[10px] font-medium flex items-center gap-1.5 ${pColor}`} title={pod.name}>
+                             <div className={`w-1.5 h-1.5 rounded-full ${pColor.includes('text-emerald') ? 'bg-emerald-400' : pColor.includes('text-error') ? 'bg-error' : pColor.includes('text-amber') ? 'bg-amber-400' : 'bg-primary'}`} />
+                             {st}
+                           </div>
+                         );
+                      })}
+                      {pods.filter(pod => {
+                         if (svc.selector && Object.keys(svc.selector).length > 0) {
+                           return Object.keys(svc.selector).every(k => pod.labels[k] === svc.selector[k]);
+                         }
+                         return pod.name.startsWith(svc.name);
+                      }).length === 0 && (
+                        <div className="text-xs text-outline italic">No pods running</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-white/10">
                     <div className="text-[10px] uppercase tracking-wider text-outline mb-2">Traffic Trend</div>
                     <Sparkline data={metric.history} color={statusColor} />
                   </div>

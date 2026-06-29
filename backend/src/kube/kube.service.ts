@@ -89,9 +89,20 @@ export class KubeService {
       const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
       const res: any = await k8sApi.listNamespacedPod(namespace);
       const items = res.body ? res.body.items : res.items;
-      const pods = items.map((pod: any) => ({
+      const pods = items.map((pod: any) => {
+        let phase = pod.status?.phase || 'Unknown';
+        if (pod.metadata?.deletionTimestamp) {
+          phase = 'Terminating';
+        } else if (pod.status?.containerStatuses) {
+          const hasCrash = pod.status.containerStatuses.some((c: any) => 
+            c.state?.waiting?.reason === 'CrashLoopBackOff' || c.state?.waiting?.reason === 'Error'
+          );
+          if (hasCrash) phase = 'CrashLoopBackOff';
+        }
+        
+        return {
         name: pod.metadata?.name,
-        status: pod.status?.phase,
+        status: phase,
         namespace: pod.metadata?.namespace,
         ip: pod.status?.podIP,
         nodeName: pod.spec?.nodeName,
@@ -104,7 +115,8 @@ export class KubeService {
         totalContainers: Array.isArray(pod.spec?.containers) ? pod.spec.containers.length : 0,
         labels: pod.metadata?.labels || {},
         createdAt: pod.metadata?.creationTimestamp,
-      }));
+      };
+    });
 
       this.podsCache.set(cacheKey, { ts: Date.now(), data: pods });
       return pods;

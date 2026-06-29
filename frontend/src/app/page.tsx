@@ -353,7 +353,6 @@ export default function Home() {
 
   const displayNodes = useMemo(() => {
     return visibleSnapshot.nodes
-      .filter((node) => node.data?.type !== 'pod')
       .map((node) => {
         const isFocused = !highlightedNodes || highlightedNodes.has(node.id);
         const opacity = blastRadiusMode && focusNodeId && !isFocused ? 0.18 : 1;
@@ -372,7 +371,6 @@ export default function Home() {
 
   const displayEdges = useMemo(() => {
     return visibleSnapshot.edges
-      .filter((edge) => !edge.id.startsWith('e-pod-')) // Remove structural edges connecting pods
       .map((edge) => {
       const isFocused = !highlightedEdges || highlightedEdges.has(edge.id);
       const muted = blastRadiusMode && focusNodeId && !isFocused;
