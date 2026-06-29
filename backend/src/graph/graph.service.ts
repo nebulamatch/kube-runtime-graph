@@ -23,6 +23,10 @@ export interface Edge {
   target: string;
   animated: boolean;
   style?: any;
+  data?: any;
+  label?: string;
+  markerEnd?: any;
+  type?: string;
 }
 
 @Injectable()
@@ -443,11 +447,37 @@ export class GraphService {
 
       // Inject active telemetry edges
       Array.from(this.activeEdges.values()).forEach(edge => {
-        const sourceExists = nodes.some(n => n.id === edge.source);
-        const targetExists = nodes.some(n => n.id === edge.target);
-        if (sourceExists && targetExists) {
-          edges.push(edge);
+        const sourceExists = nodes.find(n => n.id === edge.source);
+        const targetExists = nodes.find(n => n.id === edge.target);
+        
+        if (!sourceExists) {
+          nodes.push({
+            id: edge.source,
+            type: 'custom',
+            position: { x: centerX + (Math.random() * 400 - 200), y: startY - 200 },
+            data: {
+              label: edge.data?.sourceService || edge.data?.sourcePod || edge.source.replace(/^(pod|svc|ext)-/, ''),
+              type: edge.source.startsWith('svc-') ? 'service' : edge.source.startsWith('ext-') ? 'gateway' : 'pod',
+              rps: 0, latency: '0ms', errorRate: 0,
+              namespace: 'external'
+            }
+          });
         }
+        if (!targetExists) {
+          nodes.push({
+            id: edge.target,
+            type: 'custom',
+            position: { x: centerX + (Math.random() * 400 - 200), y: startY + 600 },
+            data: {
+              label: edge.data?.destService || edge.data?.destPod || edge.target.replace(/^(pod|svc|ext)-/, ''),
+              type: edge.target.startsWith('svc-') ? 'service' : edge.target.startsWith('ext-') ? 'gateway' : 'pod',
+              rps: 0, latency: '0ms', errorRate: 0,
+              namespace: 'external'
+            }
+          });
+        }
+        
+        edges.push(edge);
       });
 
       // store into cache (best-effort)
