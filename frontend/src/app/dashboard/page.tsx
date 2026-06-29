@@ -5,11 +5,8 @@ import { DashboardLayout } from '../../components/templates/DashboardLayout';
 import { useKubeGlobal } from '../../context/KubeContext';
 import { Typography } from '../../components/atoms/Typography';
 import { apiFetch } from '../../lib/backend';
-import StorageIcon from '@mui/icons-material/Storage';
-import SpeedIcon from '@mui/icons-material/Speed';
-import ApiIcon from '@mui/icons-material/Api';
-import MemoryIcon from '@mui/icons-material/Memory';
-import { Activity } from 'lucide-react';
+import { LineChart, Line, ResponsiveContainer, YAxis, Tooltip, Area, AreaChart } from 'recharts';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 
 interface MetricData {
   rps: number;
@@ -64,26 +61,35 @@ export default function Dashboard() {
     fetchServices();
   }, [selectedContext, selectedNamespace]);
 
-  // Mini Sparkline component
+  // Enterprise Sparkline using Recharts
   const Sparkline = ({ data, color }: { data: number[], color: string }) => {
-    const max = Math.max(...data, 100);
+    const chartData = data.map((val, i) => ({ value: val, index: i }));
     return (
-      <div className="flex items-end h-12 gap-0.5">
-        {data.map((val, i) => (
-          <div 
-            key={i} 
-            className={`flex-1 rounded-t-sm opacity-80`}
-            style={{ height: `${(val / max) * 100}%`, backgroundColor: color }}
-          />
-        ))}
+      <div className="h-16 w-full -ml-2">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={chartData}>
+            <defs>
+              <linearGradient id={`color-${color}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={color} stopOpacity={0.3}/>
+                <stop offset="95%" stopColor={color} stopOpacity={0}/>
+              </linearGradient>
+            </defs>
+            <Tooltip content={<></>} cursor={false} />
+            <Area type="monotone" dataKey="value" stroke={color} fillOpacity={1} fill={`url(#color-${color})`} isAnimationActive={false} />
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
     );
   };
 
+  const totalRPS = Object.values(metrics).reduce((sum, m) => sum + m.rps, 0);
+  const avgP99 = Object.values(metrics).length > 0 ? Math.round(Object.values(metrics).reduce((sum, m) => sum + m.p99, 0) / Object.values(metrics).length) : 0;
+  const degradedCount = Object.values(metrics).filter(m => m.errorRate > 2 || m.p99 > 120).length;
+
   return (
     <DashboardLayout>
       <div className="h-full flex flex-col p-6 overflow-hidden bg-linear-to-b from-surface to-surface-container-lowest">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <Typography variant="h1" className="text-2xl font-bold tracking-tight text-on-surface">
@@ -96,18 +102,49 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* KPI Bar */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <div className="glass-panel rounded-2xl p-4 flex flex-col">
+            <Typography variant="label" className="text-outline-variant mb-1">Total Services</Typography>
+            <div className="text-3xl font-bold text-on-surface">{services.length}</div>
+          </div>
+          <div className="glass-panel rounded-2xl p-4 flex flex-col">
+            <Typography variant="label" className="text-outline-variant mb-1">Total RPS</Typography>
+            <div className="text-3xl font-bold text-on-surface">{totalRPS}</div>
+          </div>
+          <div className="glass-panel rounded-2xl p-4 flex flex-col">
+            <Typography variant="label" className="text-outline-variant mb-1">Avg P99 Latency</Typography>
+            <div className="text-3xl font-bold text-on-surface">{avgP99} ms</div>
+          </div>
+          <div className={`glass-panel rounded-2xl p-4 flex flex-col ${degradedCount > 0 ? 'border-error/30 bg-error/5' : ''}`}>
+            <Typography variant="label" className="text-outline-variant mb-1">Health</Typography>
+            <div className="flex items-center gap-2">
+              <div className={`text-3xl font-bold ${degradedCount > 0 ? 'text-error' : 'text-emerald-400'}`}>
+                {degradedCount > 0 ? `${degradedCount} Degraded` : '100% Healthy'}
+              </div>
+              {degradedCount > 0 && <WarningAmberIcon className="text-error" />}
+            </div>
+          </div>
+        </div>
+
         {isLoading ? (
           <div className="flex flex-1 items-center justify-center">
             <div className="animate-spin h-8 w-8 rounded-full border-b-2 border-primary"></div>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto pr-2 pb-10">
-            {services.map((svc) => {
+            {services.sort((a, b) => {
+              const mA = metrics[a.name];
+              const mB = metrics[b.name];
+              const scoreA = (mA?.errorRate > 2 || mA?.p99 > 120) ? 1 : 0;
+              const scoreB = (mB?.errorRate > 2 || mB?.p99 > 120) ? 1 : 0;
+              return scoreB - scoreA;
+            }).map((svc) => {
               const metric = metrics[svc.name];
               if (!metric) return null;
 
               const isDegraded = metric.errorRate > 2 || metric.p99 > 120;
-              const statusColor = isDegraded ? 'var(--color-error)' : 'var(--color-emerald-400)';
+              const statusColor = isDegraded ? '#ffb4ab' : '#34d399'; // error : emerald-400
               const statusBg = isDegraded ? 'bg-error/10 border-error/30' : 'bg-surface-container/60 border-white/6';
               const statusText = isDegraded ? 'text-error' : 'text-emerald-400';
 

@@ -549,41 +549,50 @@ export class GraphService {
 
       // If upstream forwarded-for header exists and indicates an external origin
       const forwardedFor = (payload.headers && (payload.headers['x-forwarded-for'] || payload.headers['x-forwarded-host'])) as string | undefined;
-      if (forwardedFor) {
-        const upstream = String(forwardedFor).split(',')[0].trim();
-        // If upstream differs from the immediate source, create a synthetic external node
-        if (upstream && upstream !== payload.sourceIp) {
-          const extId = `ext-${sanitizeId(upstream)}`;
-          if (!this.discoveredDbs.has(extId)) {
-            const extNode: Node = {
-              id: extId,
-              type: 'custom',
-              position: { x: Math.random() * 800, y: Math.random() * 200 },
-              data: {
-                label: upstream,
-                type: 'external',
-                rps: 0,
-                latency: '0ms',
-                errorRate: 0,
-              },
-            };
-            this.discoveredDbs.set(extId, extNode); // reuse discoveredDbs map for lightweight synthetic nodes
-            syntheticNewNodes.push(extNode);
-          }
+      let externalLabel = '';
+      let isApim = false;
 
-          // Create an active edge from external origin -> sourceNodeId (if sourceNodeId exists)
-          if (sourceNodeId) {
-            const syntheticEdgeId = `t-${extId}-${sourceNodeId}-fwd`;
-            if (!this.activeEdges.has(syntheticEdgeId)) {
-              const synthEdge: Edge = {
-                id: syntheticEdgeId,
-                source: extId,
-                target: sourceNodeId,
-                animated: false,
-                style: { stroke: '#64748b', strokeDasharray: '4 2' },
-              };
-              this.activeEdges.set(syntheticEdgeId, synthEdge);
-            }
+      if (payload.headers && (payload.headers['x-apim-gateway'] || payload.headers['ocp-apim-subscription-key'])) {
+        isApim = true;
+        externalLabel = 'Azure APIM';
+      } else if (forwardedFor && String(forwardedFor).includes('.azure-api.net')) {
+        isApim = true;
+        externalLabel = 'Azure APIM';
+      } else if (forwardedFor) {
+        externalLabel = String(forwardedFor).split(',')[0].trim();
+      }
+
+      if (externalLabel && externalLabel !== payload.sourceIp) {
+        const extId = isApim ? 'ext-azure-apim' : `ext-${sanitizeId(externalLabel)}`;
+        if (!this.discoveredDbs.has(extId)) {
+          const extNode: Node = {
+            id: extId,
+            type: 'custom',
+            position: { x: Math.random() * 800, y: Math.random() * 200 },
+            data: {
+              label: externalLabel,
+              type: isApim ? 'gateway' : 'external',
+              rps: 0,
+              latency: '0ms',
+              errorRate: 0,
+            },
+          };
+          this.discoveredDbs.set(extId, extNode); // reuse discoveredDbs map for lightweight synthetic nodes
+          syntheticNewNodes.push(extNode);
+        }
+
+        // Create an active edge from external origin -> sourceNodeId (if sourceNodeId exists)
+        if (sourceNodeId) {
+          const syntheticEdgeId = `t-${extId}-${sourceNodeId}-fwd`;
+          if (!this.activeEdges.has(syntheticEdgeId)) {
+            const synthEdge: Edge = {
+              id: syntheticEdgeId,
+              source: extId,
+              target: sourceNodeId,
+              animated: isApim,
+              style: isApim ? { stroke: '#0078d4', strokeWidth: 2 } : { stroke: '#64748b', strokeDasharray: '4 2' },
+            };
+            this.activeEdges.set(syntheticEdgeId, synthEdge);
           }
         }
       }
@@ -639,9 +648,7 @@ export class GraphService {
           originService: sourceLabel,
           originType: sourceServiceId ? 'service' : sourcePodId ? 'pod' : 'unknown',
           // Prefer explicit forwarding headers to detect upstream client/origin (e.g. CDN, ingress)
-          requestOrigin: (payload.headers && (payload.headers['x-forwarded-for'] || payload.headers['x-forwarded-host']))
-            ? (String(payload.headers['x-forwarded-for'] || payload.headers['x-forwarded-host']).split(',')[0].trim())
-            : (sourcePodId?.replace('pod-', '') || sourceServiceId?.replace('svc-', '') || sourceLabel),
+          requestOrigin: externalLabel || (sourcePodId?.replace('pod-', '') || sourceServiceId?.replace('svc-', '') || sourceLabel),
           timestamp: new Date().toISOString(),
         }
       };

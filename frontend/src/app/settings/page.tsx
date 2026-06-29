@@ -73,6 +73,23 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* Section: External Gateways */}
+          <div className="glass-panel rounded-xl p-6 space-y-6">
+            <Typography variant="h2" className="text-base font-semibold border-b border-white/5 pb-3 text-primary-fixed">
+              External Gateways
+            </Typography>
+
+            <div className="flex flex-col space-y-2">
+              <label className="text-sm text-on-surface font-medium">Known Gateway IPs / Hosts</label>
+              <input
+                type="text"
+                placeholder="discountwishcountapim.azure-api.net, 10.0.0.1"
+                className="bg-surface-container border border-white/5 rounded-lg px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary w-full"
+              />
+              <span className="text-xs text-outline">Comma-separated list of external hosts or IPs that should be tracked as named Gateway nodes.</span>
+            </div>
+          </div>
+
           {/* Section: Telemetry */}
           <div className="glass-panel rounded-xl p-6 space-y-6">
             <Typography variant="h2" className="text-base font-semibold border-b border-white/5 pb-3 text-primary-fixed">

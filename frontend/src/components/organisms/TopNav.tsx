@@ -63,13 +63,12 @@ export const TopNav: React.FC = () => {
 
   return (
     <header className="h-16 border-b border-white/5 bg-surface-container-lowest/80 backdrop-blur-md flex items-center justify-between px-6 z-30">
-      <div className="flex items-center space-x-6">
-        {/* Cluster Selector */}
-        <div className="flex flex-col relative group">
-          <Typography variant="label" className="!text-[9px] text-outline-variant mb-0.5">Cluster</Typography>
+      <div className="flex items-center space-x-3 bg-surface-container/50 px-4 py-1.5 rounded-full border border-white/5">
+        <div className="flex items-center space-x-2">
+          <Typography variant="label" className="text-[10px] text-outline-variant uppercase tracking-wider">Cluster</Typography>
           <div className="relative">
             <select 
-              className="appearance-none bg-transparent text-sm font-medium text-on-surface focus:outline-none cursor-pointer pr-5 hover:text-primary transition-colors z-10 relative"
+              className="appearance-none bg-transparent text-sm font-semibold text-primary focus:outline-none cursor-pointer pr-5 hover:text-primary-fixed transition-colors z-10 relative"
               value={selectedContext}
               onChange={handleContextChange}
               disabled={loadingContexts}
@@ -80,18 +79,17 @@ export const TopNav: React.FC = () => {
                 <option key={ctx.name} value={ctx.name} className="bg-surface-container-high text-on-surface">{ctx.name}</option>
               ))}
             </select>
-            <KeyboardArrowDownIcon fontSize="small" className="text-outline absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <KeyboardArrowDownIcon fontSize="small" className="text-primary absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" />
           </div>
         </div>
 
-        <div className="w-[1px] h-8 bg-white/5" />
+        <span className="text-white/20">/</span>
 
-        {/* Namespace Selector */}
-        <div className="flex flex-col relative">
-          <Typography variant="label" className="!text-[9px] text-outline-variant mb-0.5">Namespace</Typography>
+        <div className="flex items-center space-x-2">
+          <Typography variant="label" className="text-[10px] text-outline-variant uppercase tracking-wider">Namespace</Typography>
           <div className="relative">
             <select 
-              className="appearance-none bg-transparent text-sm font-medium text-on-surface focus:outline-none cursor-pointer pr-5 hover:text-primary transition-colors z-10 relative"
+              className="appearance-none bg-transparent text-sm font-semibold text-primary focus:outline-none cursor-pointer pr-5 hover:text-primary-fixed transition-colors z-10 relative"
               value={selectedNamespace}
               onChange={handleNamespaceChange}
               disabled={loadingNamespaces}
@@ -102,7 +100,7 @@ export const TopNav: React.FC = () => {
                 <option key={ns.name} value={ns.name} className="bg-surface-container-high text-on-surface">{ns.name}</option>
               ))}
             </select>
-            <KeyboardArrowDownIcon fontSize="small" className="text-outline absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <KeyboardArrowDownIcon fontSize="small" className="text-primary absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" />
           </div>
         </div>
       </div>
@@ -114,8 +112,11 @@ export const TopNav: React.FC = () => {
           <input 
             type="text" 
             placeholder="Search pods, services..." 
-            className="bg-surface-container-low border border-white/5 rounded-full pl-9 pr-4 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary w-[240px] transition-all"
+            className="bg-surface-container-low border border-white/5 rounded-full pl-9 pr-12 py-1.5 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary w-[260px] transition-all"
           />
+          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[10px] text-outline-variant font-mono pointer-events-none">
+            ⌘K
+          </div>
         </div>
 
         <div className="w-[1px] h-6 bg-white/5 mx-2" />

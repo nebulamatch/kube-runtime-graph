@@ -78,7 +78,8 @@ export default function LogsPage() {
   const [loadingPods, setLoadingPods] = useState(false);
   const [isLive, setIsLive] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [showContext, setShowContext] = useState(true);
+  const [showContext, setShowContext] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const [endpointFilter, setEndpointFilter] = useState('');
   const [timeRangeMinutes, setTimeRangeMinutes] = useState(5);
   const [markedTimestamp, setMarkedTimestamp] = useState<string | null>(null);
@@ -235,45 +236,58 @@ export default function LogsPage() {
             </Typography>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
             <button
-              onClick={() => setIsLive((v) => !v)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs border ${isLive ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : 'border-white/8 bg-surface-container-low text-outline'
-                }`}
+              onClick={() => setActionsOpen(!actionsOpen)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs border border-white/8 bg-surface-container-low text-on-surface hover:bg-white/5"
             >
-              {isLive ? <PlayArrowIcon fontSize="small" /> : <PauseIcon fontSize="small" />}
-              {isLive ? 'LIVE' : 'PAUSED'}
+              Actions {actionsOpen ? '▲' : '▼'}
             </button>
-
-            <button
-              onClick={() => setAutoScroll((v) => !v)}
-              className={`px-4 py-2 rounded-xl text-xs border ${autoScroll ? 'border-primary/25 bg-primary/10 text-primary-fixed' : 'border-white/8 bg-surface-container-low text-outline'
-                }`}
-            >
-              Auto-scroll: {autoScroll ? 'ON' : 'OFF'}
-            </button>
-
-            <button
-              onClick={() => setShowContext((v) => !v)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs border ${showContext ? 'border-primary/25 bg-primary/10 text-primary-fixed' : 'border-white/8 bg-surface-container-low text-outline'
-                }`}
-            >
-              {showContext ? <CloseIcon fontSize="small" /> : <InfoOutlinedIcon fontSize="small" />}
-              {showContext ? 'Hide' : 'Show'} Context
-            </button>
-
-            <button onClick={copyLogs} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs border border-white/8 bg-surface-container-low text-on-surface hover:bg-white/5">
-              <ContentCopyIcon fontSize="small" /> Copy
-            </button>
-            <button onClick={downloadLogs} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs border border-white/8 bg-surface-container-low text-on-surface hover:bg-white/5">
-              <CloudDownloadIcon fontSize="small" /> Download
-            </button>
-            <button onClick={clearLogs} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs border border-white/8 bg-surface-container-low text-on-surface hover:bg-white/5">
-              <ClearAllIcon fontSize="small" /> Clear
-            </button>
-            <button onClick={() => setEntries([])} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs border border-white/8 bg-surface-container-low text-on-surface hover:bg-white/5">
-              <RefreshIcon fontSize="small" /> Reset
-            </button>
+            {actionsOpen && (
+              <div className="absolute right-0 top-full mt-2 w-48 rounded-xl border border-white/10 bg-[#1e2128] shadow-2xl overflow-hidden z-20 flex flex-col">
+                <button
+                  onClick={() => {
+                    setIsLive((v) => !v);
+                    setActionsOpen(false);
+                  }}
+                  className={`flex items-center gap-2 px-4 py-3 text-xs border-b border-white/5 hover:bg-white/5 ${isLive ? 'text-emerald-300' : 'text-outline'}`}
+                >
+                  {isLive ? <PauseIcon fontSize="small" /> : <PlayArrowIcon fontSize="small" />}
+                  {isLive ? 'Pause Stream' : 'Resume Stream'}
+                </button>
+                <button
+                  onClick={() => {
+                    setAutoScroll((v) => !v);
+                    setActionsOpen(false);
+                  }}
+                  className={`flex items-center gap-2 px-4 py-3 text-xs border-b border-white/5 hover:bg-white/5 ${autoScroll ? 'text-primary-fixed' : 'text-outline'}`}
+                >
+                  Auto-scroll: {autoScroll ? 'ON' : 'OFF'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowContext((v) => !v);
+                    setActionsOpen(false);
+                  }}
+                  className={`flex items-center gap-2 px-4 py-3 text-xs border-b border-white/5 hover:bg-white/5 ${showContext ? 'text-primary-fixed' : 'text-outline'}`}
+                >
+                  {showContext ? <CloseIcon fontSize="small" /> : <InfoOutlinedIcon fontSize="small" />}
+                  {showContext ? 'Hide Context' : 'Show Context'}
+                </button>
+                <button onClick={() => { copyLogs(); setActionsOpen(false); }} className="flex items-center gap-2 px-4 py-3 text-xs border-b border-white/5 text-on-surface hover:bg-white/5">
+                  <ContentCopyIcon fontSize="small" /> Copy
+                </button>
+                <button onClick={() => { downloadLogs(); setActionsOpen(false); }} className="flex items-center gap-2 px-4 py-3 text-xs border-b border-white/5 text-on-surface hover:bg-white/5">
+                  <CloudDownloadIcon fontSize="small" /> Download
+                </button>
+                <button onClick={() => { clearLogs(); setActionsOpen(false); }} className="flex items-center gap-2 px-4 py-3 text-xs border-b border-white/5 text-on-surface hover:bg-white/5">
+                  <ClearAllIcon fontSize="small" /> Clear
+                </button>
+                <button onClick={() => { setEntries([]); setActionsOpen(false); }} className="flex items-center gap-2 px-4 py-3 text-xs text-on-surface hover:bg-white/5">
+                  <RefreshIcon fontSize="small" /> Reset
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -335,7 +349,7 @@ export default function LogsPage() {
           <aside className="min-h-0 rounded-3xl border border-white/6 bg-[#12151b] shadow-2xl shadow-black/20 flex flex-col overflow-hidden">
             <div className="p-4 border-b border-white/8 bg-white/3">
               <Typography variant="h3" className="text-sm uppercase tracking-[0.22em] text-outline-variant mb-3">
-                Log Sources
+                PODS
               </Typography>
               <div className="relative">
                 <SearchIcon fontSize="small" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />

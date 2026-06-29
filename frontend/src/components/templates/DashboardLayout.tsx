@@ -13,7 +13,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
       <Sidebar />
       
       {/* Main Content Area */}
-      <main className="flex-1 ml-[260px] relative h-screen flex flex-col overflow-hidden">
+      <main className="flex-1 md:ml-[260px] relative h-screen flex flex-col overflow-hidden">
         {/* Background gradient subtle glow */}
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary-container/5 rounded-full blur-[120px] pointer-events-none" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-secondary-container/5 rounded-full blur-[120px] pointer-events-none" />

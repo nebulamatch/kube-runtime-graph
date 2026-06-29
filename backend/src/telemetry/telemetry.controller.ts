@@ -121,11 +121,13 @@ export class TelemetryController {
           analysis,
         });
 
+        const originLabel = resultData?.edge?.data?.requestOrigin || sourceService || 'Unknown client';
+
         if (analysis && (analysis.severity === 'warning' || analysis.severity === 'error')) {
           this.graphGateway.server.emit('notification', {
             id: `notif-${Date.now()}`,
             title: analysis.summary,
-            message: `${sourceService || 'Unknown client'} -> ${destService || 'Unknown service'}: ${endpoint || 'Unknown endpoint'}`,
+            message: `${originLabel} -> ${destService || 'Unknown service'}: ${endpoint || 'Unknown endpoint'}`,
             type: analysis.severity,
             serviceId: destService
           });

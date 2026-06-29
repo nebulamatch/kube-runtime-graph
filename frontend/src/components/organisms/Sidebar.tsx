@@ -14,14 +14,17 @@ export const Sidebar: React.FC = () => {
   const pathname = usePathname();
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-[260px] bg-surface-container-lowest border-r border-white/5 flex flex-col z-40">
+    <aside className="fixed left-0 top-0 bottom-0 w-[260px] bg-surface-container-lowest border-r border-white/5 hidden md:flex flex-col z-40">
       <div className="flex items-center px-6 py-6 border-b border-white/5">
         <div className="w-8 h-8 rounded-lg bg-primary-container flex items-center justify-center text-on-primary mr-3 shadow-[0_0_15px_rgba(173,198,255,0.3)]">
           <DashboardIcon fontSize="small" />
         </div>
-        <Typography variant="h2" className="text-on-surface">
-          KubeGraph
-        </Typography>
+        <div className="flex items-center gap-2">
+          <Typography variant="h2" className="text-on-surface">
+            KubeGraph
+          </Typography>
+          <div className="w-2 h-2 rounded-full bg-emerald-400 glow-green" title="Cluster Connected" />
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto py-6 px-4 space-y-1">

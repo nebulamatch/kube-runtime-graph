@@ -10,6 +10,9 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
 import ApiIcon from '@mui/icons-material/Api';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import CloseIcon from '@mui/icons-material/Close';
+import DownloadIcon from '@mui/icons-material/Download';
 import { apiUrl } from '../../lib/backend';
 
 interface KubeEvent {
@@ -74,6 +77,8 @@ export default function EventsPage() {
     if (!evt) return '-';
     const forwarded = evt.headers?.['x-forwarded-for'] || evt.headers?.['x-forwarded-host'];
     if (forwarded) return String(forwarded).split(',')[0].trim();
+    const origin = evt.headers?.['origin'] || evt.headers?.['referer'];
+    if (origin) return String(origin);
     return evt.sourceService || evt.sourcePod || evt.sourceIp || '-';
   };
 
@@ -305,8 +310,7 @@ export default function EventsPage() {
                 <thead className="sticky top-0 z-10">
                   <tr className="bg-[#2b2f35] text-[#aeb4bd] text-[11px] uppercase tracking-[0.18em] border-b border-white/6">
                     <th className="px-4 py-3">Timestamp</th>
-                    <th className="px-4 py-3">Source Pod</th>
-                    <th className="px-4 py-3">Destination Pod</th>
+                    <th className="px-4 py-3 min-w-80">Origin Chain</th>
                     <th className="px-4 py-3 text-center">Method</th>
                     <th className="px-4 py-3">Path</th>
                     <th className="px-4 py-3 text-center">Status Code</th>
@@ -324,17 +328,18 @@ export default function EventsPage() {
                     return (
                       <tr key={evt.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                         <td className="px-4 py-3 text-[11px] text-[#b4bac4] whitespace-nowrap font-mono">{formatTime(evt.timestamp)}</td>
-                        <td className="px-4 py-3 min-w-45">
-                          <div className="font-semibold text-on-surface text-sm truncate max-w-55">{sourceLabel}</div>
-                          {evt.sourceService && evt.sourceService !== evt.sourcePod && (
-                            <div className="text-[11px] text-outline-variant">svc: {evt.sourceService}</div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 min-w-45">
-                          <div className="font-semibold text-on-surface text-sm truncate max-w-55">{destLabel}</div>
-                          {evt.destService && evt.destService !== evt.destPod && (
-                            <div className="text-[11px] text-outline-variant">svc: {evt.destService}</div>
-                          )}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2 font-mono text-xs text-on-surface truncate">
+                            {requestOrigin(evt) !== sourceLabel && (
+                              <>
+                                <span className="text-primary/70 font-semibold">{requestOrigin(evt)}</span>
+                                <span className="text-outline-variant">→</span>
+                              </>
+                            )}
+                            <span className="text-emerald-400/90">{sourceLabel}</span>
+                            <span className="text-outline-variant">→</span>
+                            <span className="text-amber-400/90">{destLabel}</span>
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-center">
                           <span className="inline-flex items-center rounded-md border border-[#f0b44c]/25 bg-[#f0b44c]/10 px-2.5 py-1 text-[11px] font-semibold text-[#f0b44c]">
@@ -381,8 +386,8 @@ export default function EventsPage() {
 
         {selectedEvent && (
           <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex items-center justify-center p-6">
-            <div className="w-full max-w-4xl rounded-3xl border border-white/10 bg-[#12141a] shadow-2xl shadow-black/40 overflow-hidden">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-white/8 bg-white/3">
+            <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-3xl border border-white/10 bg-[#12141a] shadow-2xl shadow-black/40 overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-white/8 bg-white/3 shrink-0">
                 <div>
                   <Typography variant="h2" className="text-on-surface text-xl">
                     API Event Details
@@ -391,23 +396,39 @@ export default function EventsPage() {
                     {selectedEvent.method || 'TRACE'} {selectedEvent.endpoint || selectedEvent.url || selectedEvent.path || '-'}
                   </Typography>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 text-outline-variant">
                   <button
-                    onClick={() => navigator.clipboard?.writeText(JSON.stringify(selectedEvent, null, 2))}
-                    className="rounded-lg border border-white/10 px-3 py-2 text-xs text-on-surface hover:bg-white/5"
+                    title="Download JSON"
+                    onClick={() => {
+                      const blob = new Blob([JSON.stringify(selectedEvent, null, 2)], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `api-event-${selectedEvent.id}.json`;
+                      a.click();
+                    }}
+                    className="p-2 rounded-xl hover:bg-white/10 hover:text-on-surface transition-colors"
                   >
-                    Copy JSON
+                    <DownloadIcon fontSize="small" />
                   </button>
                   <button
-                    onClick={() => setSelectedEvent(null)}
-                    className="rounded-lg border border-white/10 px-3 py-2 text-xs text-on-surface hover:bg-white/5"
+                    title="Copy JSON"
+                    onClick={() => navigator.clipboard?.writeText(JSON.stringify(selectedEvent, null, 2))}
+                    className="p-2 rounded-xl hover:bg-white/10 hover:text-on-surface transition-colors"
                   >
-                    Close
+                    <ContentCopyIcon fontSize="small" />
+                  </button>
+                  <button
+                    title="Close"
+                    onClick={() => setSelectedEvent(null)}
+                    className="p-2 rounded-xl hover:bg-error/20 hover:text-error transition-colors ml-2"
+                  >
+                    <CloseIcon fontSize="small" />
                   </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 p-6">
+              <div className="grid grid-cols-2 gap-4 p-6 overflow-y-auto terminal-scroll">
                 <div className="rounded-2xl border border-white/8 bg-surface-container-low p-4">
                   <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant mb-3">Request</div>
                   <div className="space-y-2 text-sm">

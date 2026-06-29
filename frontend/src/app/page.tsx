@@ -732,6 +732,33 @@ export default function Home() {
           />
         </div>
 
+        {/* Legend Panel */}
+        <div className="absolute bottom-4 left-4 z-20 rounded-2xl border border-white/8 bg-surface-container-low/90 backdrop-blur-md px-4 py-3 shadow-[0_12px_30px_rgba(0,0,0,0.3)]">
+          <div className="text-[10px] uppercase tracking-widest text-outline-variant mb-2 font-semibold">Topology Legend</div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-surface-container border border-primary-container" />
+              <span className="text-xs text-on-surface font-medium">Microservice</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-surface-container border border-amber-400" />
+              <span className="text-xs text-on-surface font-medium">Gateway / Ingress</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded bg-surface-container border border-emerald-400" />
+              <span className="text-xs text-on-surface font-medium">Database / Storage</span>
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="w-6 h-[2px] bg-primary-container" />
+              <span className="text-xs text-on-surface font-medium">Active Traffic</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-[2px] border-b-2 border-dashed border-[#ff4d6d]" />
+              <span className="text-xs text-error font-medium">Failing Traffic (4xx/5xx)</span>
+            </div>
+          </div>
+        </div>
+
         <ActionPanel
           isOpen={isPanelOpen}
           onClose={handleClosePanel}

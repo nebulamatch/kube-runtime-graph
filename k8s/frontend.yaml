@@ -15,8 +15,6 @@ spec:
       labels:
         app: kube-runtime-graph-frontend
     spec:
-      imagePullSecrets:
-      - name: ghcr-login
       containers:
       - name: frontend
         image: ghcr.io/nebulamatch/kube-runtime-graph-frontend:latest

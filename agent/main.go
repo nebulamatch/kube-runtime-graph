@@ -401,7 +401,7 @@ func parseHTTPMessage(raw string) (method string, path string, fullURL string, h
 		key := strings.ToLower(strings.TrimSpace(line[:idx]))
 		value := strings.TrimSpace(line[idx+1:])
 		switch key {
-		case "host", "user-agent", "x-request-id", "traceparent", "content-type", "authorization", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "via", "x-envoy-pair":
+		case "host", "user-agent", "x-request-id", "traceparent", "content-type", "authorization", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "via", "x-envoy-pair", "x-apim-gateway", "ocp-apim-subscription-key", "apim-request-id":
 			selectedHeaders[key] = value
 		default:
 			// capture envoy-related headers (prefix) and keep small set
