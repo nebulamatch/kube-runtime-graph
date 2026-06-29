@@ -62,6 +62,10 @@ spec:
         env:
         - name: BACKEND_URL
           value: "http://kube-runtime-graph-backend.kube-system.svc.cluster.local:3001/api/telemetry"
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
         volumeMounts:
         - name: sys-kernel-debug
           mountPath: /sys/kernel/debug

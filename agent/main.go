@@ -65,6 +65,10 @@ var telemetryHTTPClient = &http.Client{
 	},
 }
 
+// nodeIP is the IP of the node this agent is running on. Traffic to/from this
+// IP on Kubernetes system ports (kubelet, kube-proxy, konnectivity) is skipped.
+var nodeIP = os.Getenv("NODE_IP")
+
 type requestInfo struct {
 	ts      time.Time
  	tmethod string
@@ -456,17 +460,54 @@ func telemetrySender(url string) {
 }
 
 func shouldSkipTelemetry(path, fullURL string, dport uint16, dstIP string) bool {
+	// Skip Azure IMDS and Azure Wire-server (host metadata)
 	if dstIP == "169.254.169.254" || dstIP == "168.63.129.16" {
 		return true
 	}
+
+	// Skip traffic to/from our own node IP on Kubernetes system ports
+	if nodeIP != "" && dstIP == nodeIP {
+		return true
+	}
+
+	// Skip well-known Kubernetes system ports:
+	//   9153  = CoreDNS metrics
+	//   10248 = kubelet healthz
+	//   10249 = kube-proxy metrics
+	//   10250 = kubelet HTTPS API
+	//   10255 = kubelet read-only
+	//   10257 = kube-controller-manager
+	//   10259 = kube-scheduler
+	//   10092 = kubelet health (Azure CNI)
+	//   10096 = kubelet (Azure)
+	//   19100 = kubelet metrics (Azure CNI)
+	//   20257 = kube-proxy liveness
+	//   29615 = node-problem-detector
+	//   8081-8084 = konnectivity tunnel ports
 	switch dport {
-	case 9153, 10250, 10255, 10257, 10259:
+	case 9153, 10248, 10249, 10250, 10255, 10257, 10259,
+		10092, 10096, 19100, 20257, 29615,
+		8081, 8082, 8083, 8084:
 		return true
 	}
+
+	// Skip Kubernetes API server port (usually 443 or 6443) when destined to the node
+	if dport == 6443 {
+		return true
+	}
+
+	// Skip metrics/health/readiness paths (self-reported by pods)
 	lowerPath := strings.ToLower(path)
-	if strings.HasPrefix(lowerPath, "/metrics") || strings.HasPrefix(lowerPath, "/health") || strings.HasPrefix(lowerPath, "/ready") || strings.HasPrefix(lowerPath, "/live") {
+	if strings.HasPrefix(lowerPath, "/metrics") ||
+		strings.HasPrefix(lowerPath, "/health") ||
+		strings.HasPrefix(lowerPath, "/ready") ||
+		strings.HasPrefix(lowerPath, "/live") ||
+		strings.HasPrefix(lowerPath, "/healthz") ||
+		strings.HasPrefix(lowerPath, "/readyz") ||
+		strings.HasPrefix(lowerPath, "/livez") {
 		return true
 	}
+
 	return strings.Contains(strings.ToLower(fullURL), "/api/telemetry")
 }
 

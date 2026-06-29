@@ -417,6 +417,28 @@ export class GraphService {
     responseBody?: string;
     durationMs?: number;
   }) {
+    // ── Drop known Kubernetes system ports that are never application traffic ──
+    const SYSTEM_PORTS = new Set([
+      9153,  // CoreDNS metrics
+      10248, // kubelet healthz
+      10249, // kube-proxy metrics
+      10250, // kubelet HTTPS
+      10255, // kubelet read-only
+      10257, // kube-controller-manager
+      10259, // kube-scheduler
+      10092, // kubelet health (Azure CNI)
+      10096, // kubelet (Azure)
+      19100, // kubelet metrics (Azure CNI)
+      20257, // kube-proxy liveness
+      29615, // node-problem-detector
+      8081, 8082, 8083, 8084, // konnectivity
+      6443,  // Kubernetes API server
+    ]);
+    if (SYSTEM_PORTS.has(payload.destPort)) return null;
+
+    // Drop Azure IMDS / Wire-server traffic
+    if (payload.destIp === '169.254.169.254' || payload.destIp === '168.63.129.16') return null;
+
     let sourceNodeId = this.ipToServiceCache.get(payload.sourceIp) || this.podCache.get(payload.sourceIp);
     let destNodeId = this.serviceIpCache.get(payload.destIp) || this.ipToServiceCache.get(payload.destIp) || this.podCache.get(payload.destIp);
 
