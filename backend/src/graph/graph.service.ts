@@ -437,8 +437,6 @@ export class GraphService {
       29615, // node-problem-detector
       8081, 8082, 8083, 8084, // konnectivity
       6443,  // Kubernetes API server
-      3000,  // Kube Runtime Graph Frontend
-      3001,  // Kube Runtime Graph Backend
     ]);
     if (SYSTEM_PORTS.has(payload.destPort)) return null;
 
@@ -447,6 +445,11 @@ export class GraphService {
 
     let sourceNodeId = this.ipToServiceCache.get(payload.sourceIp) || this.podCache.get(payload.sourceIp);
     let destNodeId = this.serviceIpCache.get(payload.destIp) || this.ipToServiceCache.get(payload.destIp) || this.podCache.get(payload.destIp);
+
+    // Explicitly hide Kube Runtime Graph's own internal traffic
+    if ((sourceNodeId && sourceNodeId.includes('kube-runtime-graph')) || (destNodeId && destNodeId.includes('kube-runtime-graph'))) {
+      return null;
+    }
 
     // If we don't have mappings yet, attempt a lightweight resolution against the
     // cluster so telemetry arriving before a client-requested snapshot can still
