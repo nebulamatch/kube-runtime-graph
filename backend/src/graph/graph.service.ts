@@ -610,7 +610,7 @@ export class GraphService {
           originService: sourceLabel,
           originType: sourceServiceId ? 'service' : sourcePodId ? 'pod' : 'unknown',
           // Prefer explicit forwarding headers to detect upstream client/origin (e.g. CDN, ingress)
-          requestOrigin: externalLabel || (sourcePodId?.replace('pod-', '') || sourceServiceId?.replace('svc-', '') || sourceLabel),
+          requestOrigin: (payload.headers?.['x-forwarded-for'] || payload.headers?.['x-forwarded-host'] || sourcePodId?.replace('pod-', '') || sourceServiceId?.replace('svc-', '') || sourceLabel),
           timestamp: new Date().toISOString(),
         }
       };
