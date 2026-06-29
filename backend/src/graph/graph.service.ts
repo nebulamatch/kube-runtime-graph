@@ -256,9 +256,9 @@ export class GraphService {
       // ── STEP 1: Populate IP ↔ node caches from K8s inventory.
       //    We do NOT push any nodes/edges into the output here.
       //    The graph is built ONLY from activeEdges (real observed traffic).
-      const servicesRes: any = await k8sApi.listNamespacedService(namespace);
+      const servicesRes: any = await k8sApi.listServiceForAllNamespaces();
       const servicesItems = servicesRes.body ? servicesRes.body.items : servicesRes.items;
-      const podsRes: any = await k8sApi.listNamespacedPod(namespace);
+      const podsRes: any = await k8sApi.listPodForAllNamespaces();
       const podsItems = podsRes.body ? podsRes.body.items : podsRes.items;
 
       // Build all namespace service IP mappings
@@ -456,21 +456,22 @@ export class GraphService {
     const newNodes: Node[] = [];
 
     if (!sourceNodeId) {
-      sourceNodeId = `ext-${payload.sourceIp}`;
+      let isApim = false;
+      if (payload.headers && (payload.headers['x-apim-gateway'] || payload.headers['ocp-apim-subscription-key'])) {
+        isApim = true;
+      } else if (payload.headers && String(payload.headers['x-forwarded-host'] || '').includes('.azure-api.net')) {
+        isApim = true;
+      }
+      
+      sourceNodeId = isApim ? 'ext-apim' : 'ext-clients';
       if (!this.discoveredDbs.has(sourceNodeId)) {
-        // We can parse headers to see if it's APIM
-        let label = 'External Client';
-        if (payload.headers && (payload.headers['x-apim-gateway'] || payload.headers['ocp-apim-subscription-key'])) {
-          label = 'Azure APIM';
-        }
-
         const extNode: Node = {
           id: sourceNodeId,
           type: 'custom',
           position: { x: Math.random() * 800, y: Math.random() * 200 },
           data: {
-            label: label,
-            type: 'external',
+            label: isApim ? 'Azure APIM' : 'External Clients',
+            type: isApim ? 'gateway' : 'external',
             rps: 0,
             latency: '0ms',
             errorRate: 0,
@@ -557,57 +558,6 @@ export class GraphService {
         return String(s).replace(/[^a-zA-Z0-9-_:.]/g, '_').slice(0, 120);
       };
 
-      const syntheticNewNodes: Node[] = [];
-
-      // If upstream forwarded-for header exists and indicates an external origin
-      const forwardedFor = (payload.headers && (payload.headers['x-forwarded-for'] || payload.headers['x-forwarded-host'])) as string | undefined;
-      let externalLabel = '';
-      let isApim = false;
-
-      if (payload.headers && (payload.headers['x-apim-gateway'] || payload.headers['ocp-apim-subscription-key'])) {
-        isApim = true;
-        externalLabel = 'Azure APIM';
-      } else if (forwardedFor && String(forwardedFor).includes('.azure-api.net')) {
-        isApim = true;
-        externalLabel = 'Azure APIM';
-      } else if (forwardedFor) {
-        externalLabel = String(forwardedFor).split(',')[0].trim();
-      }
-
-      if (externalLabel && externalLabel !== payload.sourceIp) {
-        const extId = isApim ? 'ext-azure-apim' : `ext-${sanitizeId(externalLabel)}`;
-        if (!this.discoveredDbs.has(extId)) {
-          const extNode: Node = {
-            id: extId,
-            type: 'custom',
-            position: { x: Math.random() * 800, y: Math.random() * 200 },
-            data: {
-              label: externalLabel,
-              type: isApim ? 'gateway' : 'external',
-              rps: 0,
-              latency: '0ms',
-              errorRate: 0,
-            },
-          };
-          this.discoveredDbs.set(extId, extNode); // reuse discoveredDbs map for lightweight synthetic nodes
-          syntheticNewNodes.push(extNode);
-        }
-
-        // Create an active edge from external origin -> sourceNodeId (if sourceNodeId exists)
-        if (sourceNodeId) {
-          const syntheticEdgeId = `t-${extId}-${sourceNodeId}-fwd`;
-          if (!this.activeEdges.has(syntheticEdgeId)) {
-            const synthEdge: Edge = {
-              id: syntheticEdgeId,
-              source: extId,
-              target: sourceNodeId,
-              animated: isApim,
-              style: isApim ? { stroke: '#0078d4', strokeWidth: 2 } : { stroke: '#64748b', strokeDasharray: '4 2' },
-            };
-            this.activeEdges.set(syntheticEdgeId, synthEdge);
-          }
-        }
-      }
 
       // Trace-based chaining: if request contains a trace id we can stitch previous node -> this source
       const traceIdHeader = (payload.headers && (payload.headers['traceparent'] || payload.headers['x-request-id'])) as string | undefined;

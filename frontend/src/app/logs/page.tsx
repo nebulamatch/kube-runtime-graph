@@ -220,7 +220,7 @@ export default function LogsPage() {
 
   const renderPods = () => {
     return (
-      <div className='bg-white/3 rounded-2xl'>
+      <div className='bg-white/3 rounded-2xl w-1/4 h-full'>
         <div className="p-4 border-b border-white/8 ">
           <Typography variant="h3" className="text-sm uppercase tracking-[0.22em] text-outline-variant mb-3">
             PODS
@@ -236,7 +236,7 @@ export default function LogsPage() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto terminal-scroll p-3 space-y-2">
+        <div className="flex-1 overflow-y-auto terminal-scroll p-3 space-y-2 h-[calc(100%-20%)]">
           {loadingPods ? (
             <div className="flex h-full items-center justify-center">
               <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -281,7 +281,7 @@ export default function LogsPage() {
 
   const renderLogs = () => {
     return (
-      <div className='rounded-2xl'>
+      <div className='rounded-2xl w-3/4 h-full'>
         <div className="border-b border-white/8 bg-[#12151b] px-5 py-3 flex flex-wrap items-center gap-3 shrink-0">
           <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-outline-variant">
             Severity
@@ -307,12 +307,12 @@ export default function LogsPage() {
             />
           </div>
         </div>
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 flex flex-col h-[calc(100%-10%)]">
           <div className="px-5 py-2 border-b border-white/8 bg-[#11151a] flex items-center justify-between shrink-0">
             <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant">Stream</div>
             <div className="text-[11px] text-outline-variant">Showing {visibleEntries.length} entries</div>
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto terminal-scroll bg-[#0d1014] px-5 py-4 overscroll-contain">
+          <div className="flex-1 min-h-0 overflow-y-auto terminal-scroll bg-[#0d1014] px-5 py-4 overscroll-contain h-[calc(100%-20%)]">
             {
               visibleEntries.length == 0 ? (
                 <div className="h-full flex items-center justify-center text-outline text-sm">
@@ -481,13 +481,9 @@ export default function LogsPage() {
             )}
           </div>
         </div>
-        <div className='flex gap-2'>
-          <div className="w-1/4">
-            {renderPods()}
-          </div>
-          <div className="w-3/4">
-            {renderLogs()}
-          </div>
+        <div className='flex gap-2 h-[calc(100%-20%)]'>
+          {renderPods()}
+          {renderLogs()}
         </div>
       </div>
     </DashboardLayout>
