@@ -352,7 +352,14 @@ export default function Home() {
   const mismatchAlerts = useMemo(() => deriveMismatchAlerts(visibleSnapshot.edges, focusNodeId), [visibleSnapshot.edges, focusNodeId]);
 
   const displayNodes = useMemo(() => {
+    const activeNodeIds = new Set<string>();
+    visibleSnapshot.edges.forEach((e) => {
+      activeNodeIds.add(e.source);
+      activeNodeIds.add(e.target);
+    });
+
     return visibleSnapshot.nodes
+      .filter((node) => activeNodeIds.has(node.id))
       .map((node) => {
         const isFocused = !highlightedNodes || highlightedNodes.has(node.id);
         const opacity = blastRadiusMode && focusNodeId && !isFocused ? 0.18 : 1;
@@ -367,7 +374,7 @@ export default function Home() {
           selected: node.id === focusNodeId,
         };
       });
-  }, [blastRadiusMode, focusNodeId, highlightedNodes, visibleSnapshot.nodes]);
+  }, [blastRadiusMode, focusNodeId, highlightedNodes, visibleSnapshot.nodes, visibleSnapshot.edges]);
 
   const displayEdges = useMemo(() => {
     return visibleSnapshot.edges

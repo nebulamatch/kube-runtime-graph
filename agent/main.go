@@ -328,7 +328,7 @@ func parseHTTPMessage(raw string) (method string, path string, fullURL string, h
 	// Detect response lines that start with HTTP/1.1 200 OK
 	if strings.HasPrefix(first, "HTTP/") {
 		isResponse = true
-		parts := strings.SplitN(first, " ", 3)
+		parts := strings.Fields(first)
 		if len(parts) >= 2 {
 			// parse status code
 			code := strings.TrimSpace(parts[1])
