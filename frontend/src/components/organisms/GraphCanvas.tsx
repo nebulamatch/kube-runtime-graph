@@ -92,6 +92,7 @@ const GraphCanvasComponent: React.FC<GraphCanvasProps> = ({ nodes, edges, onNode
     service: CustomPodNode,
     db: CustomPodNode,
     custom: CustomPodNode,
+    external: CustomPodNode,
     default: CustomPodNode,
   }), []);
   const edgeTypes: EdgeTypes = useMemo(() => ({ custom: CustomEdge }), []);

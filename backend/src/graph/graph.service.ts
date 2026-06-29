@@ -387,6 +387,7 @@ export class GraphService {
             target: svcId,
             animated: true,
             style: { stroke: '#9ca3af' },
+            data: { isStructural: true }
           });
         });
       });

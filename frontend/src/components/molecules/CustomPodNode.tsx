@@ -15,11 +15,12 @@ export const CustomPodNode = memo(({ data, selected }: NodeProps) => {
   const lowerLabel = label.toLowerCase();
   
   const isDb = nodeType === 'db' || lowerLabel.includes('db') || lowerLabel.includes('redis') || lowerLabel.includes('postgres') || lowerLabel.includes('mysql') || lowerLabel.includes('mongo');
-  const isService = nodeType === 'service' || (!isDb && (lowerLabel.includes('service') || lowerLabel.includes('api') || lowerLabel.includes('gateway')));
+  const isExternal = nodeType === 'external' || lowerLabel.includes('gateway') || lowerLabel.includes('ingress');
+  const isService = nodeType === 'service' || (!isDb && !isExternal && (lowerLabel.includes('service') || lowerLabel.includes('api')));
 
-  const Icon = isDb ? StorageIcon : isService ? ApiIcon : HubIcon;
-  const accentClass = isDb ? 'text-amber-300' : isService ? 'text-primary-fixed' : 'text-emerald-300';
-  const nodeTitle = isDb ? 'Database' : isService ? 'Service' : 'Pod';
+  const Icon = isDb ? StorageIcon : isExternal ? HubIcon : isService ? ApiIcon : HubIcon;
+  const accentClass = isDb ? 'text-emerald-400' : isExternal ? 'text-amber-400' : isService ? 'text-primary-fixed' : 'text-blue-300';
+  const nodeTitle = isDb ? 'Database' : isExternal ? 'External Endpoint' : isService ? 'Service' : 'Pod';
 
   return (
     <div className={`

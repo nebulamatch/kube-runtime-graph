@@ -351,13 +351,31 @@ export default function Home() {
 
   const mismatchAlerts = useMemo(() => deriveMismatchAlerts(visibleSnapshot.edges, focusNodeId), [visibleSnapshot.edges, focusNodeId]);
 
-  const displayNodes = useMemo(() => {
-    const activeNodeIds = new Set<string>();
+  const activeNodeIds = useMemo(() => {
+    const trafficNodeIds = new Set<string>();
+    
+    // First pass: identify all nodes involved in actual traffic (non-structural edges)
     visibleSnapshot.edges.forEach((e) => {
-      activeNodeIds.add(e.source);
-      activeNodeIds.add(e.target);
+      if (!e.data?.isStructural) {
+        trafficNodeIds.add(e.source);
+        trafficNodeIds.add(e.target);
+      }
     });
 
+    // Second pass: add structural partners (e.g. parent Services for active Pods)
+    const result = new Set<string>(trafficNodeIds);
+    visibleSnapshot.edges.forEach((e) => {
+      if (e.data?.isStructural) {
+        // If the pod (target) is active, show the service (source)
+        if (trafficNodeIds.has(e.target)) result.add(e.source);
+        // If the service (source) is active, show the pod (target)
+        if (trafficNodeIds.has(e.source)) result.add(e.target);
+      }
+    });
+    return result;
+  }, [visibleSnapshot.edges]);
+
+  const displayNodes = useMemo(() => {
     return visibleSnapshot.nodes
       .filter((node) => activeNodeIds.has(node.id))
       .map((node) => {
@@ -374,10 +392,11 @@ export default function Home() {
           selected: node.id === focusNodeId,
         };
       });
-  }, [blastRadiusMode, focusNodeId, highlightedNodes, visibleSnapshot.nodes, visibleSnapshot.edges]);
+  }, [blastRadiusMode, focusNodeId, highlightedNodes, visibleSnapshot.nodes, activeNodeIds]);
 
   const displayEdges = useMemo(() => {
     return visibleSnapshot.edges
+      .filter((edge) => activeNodeIds.has(edge.source) && activeNodeIds.has(edge.target))
       .map((edge) => {
       const isFocused = !highlightedEdges || highlightedEdges.has(edge.id);
       const muted = blastRadiusMode && focusNodeId && !isFocused;
