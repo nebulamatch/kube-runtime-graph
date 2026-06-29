@@ -351,33 +351,8 @@ export default function Home() {
 
   const mismatchAlerts = useMemo(() => deriveMismatchAlerts(visibleSnapshot.edges, focusNodeId), [visibleSnapshot.edges, focusNodeId]);
 
-  const activeNodeIds = useMemo(() => {
-    const trafficNodeIds = new Set<string>();
-    
-    // First pass: identify all nodes involved in actual traffic (non-structural edges)
-    visibleSnapshot.edges.forEach((e) => {
-      if (!e.data?.isStructural) {
-        trafficNodeIds.add(e.source);
-        trafficNodeIds.add(e.target);
-      }
-    });
-
-    // Second pass: add structural partners (e.g. parent Services for active Pods)
-    const result = new Set<string>(trafficNodeIds);
-    visibleSnapshot.edges.forEach((e) => {
-      if (e.data?.isStructural) {
-        // If the pod (target) is active, show the service (source)
-        if (trafficNodeIds.has(e.target)) result.add(e.source);
-        // If the service (source) is active, show the pod (target)
-        if (trafficNodeIds.has(e.source)) result.add(e.target);
-      }
-    });
-    return result;
-  }, [visibleSnapshot.edges]);
-
   const displayNodes = useMemo(() => {
     return visibleSnapshot.nodes
-      .filter((node) => activeNodeIds.has(node.id))
       .map((node) => {
         const isFocused = !highlightedNodes || highlightedNodes.has(node.id);
         const opacity = blastRadiusMode && focusNodeId && !isFocused ? 0.18 : 1;
@@ -392,11 +367,10 @@ export default function Home() {
           selected: node.id === focusNodeId,
         };
       });
-  }, [blastRadiusMode, focusNodeId, highlightedNodes, visibleSnapshot.nodes, activeNodeIds]);
+  }, [blastRadiusMode, focusNodeId, highlightedNodes, visibleSnapshot.nodes]);
 
   const displayEdges = useMemo(() => {
     return visibleSnapshot.edges
-      .filter((edge) => activeNodeIds.has(edge.source) && activeNodeIds.has(edge.target))
       .map((edge) => {
       const isFocused = !highlightedEdges || highlightedEdges.has(edge.id);
       const muted = blastRadiusMode && focusNodeId && !isFocused;
@@ -481,12 +455,11 @@ export default function Home() {
       const layoutedNodes = layoutTopToBottom(mappedNodes, data.edges || []);
 
       // Map edges - auto-detect styling based on node types
-      const mappedEdges = data.edges.map((e: any) => {
+        const mappedEdges = data.edges.map((e: any) => {
         const sourceNode = data.nodes.find((n: any) => n.id === e.source);
         const targetNode = data.nodes.find((n: any) => n.id === e.target);
         const sourceType = sourceNode?.data?.type || sourceNode?.type || 'pod';
         const targetType = targetNode?.data?.type || targetNode?.type || 'pod';
-        console.log(`Edge ${e.id}: sourceType=${sourceType}, targetType=${targetType}`);
         // Determine if special edge (service-to-service, pod-to-db, etc)
         const isSpecialConnection = sourceType !== 'pod' || targetType !== 'pod';
         const statusCode = Number(e.data?.statusCode || 0);

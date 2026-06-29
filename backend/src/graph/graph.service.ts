@@ -253,39 +253,15 @@ export class GraphService {
       this.serviceIpCache.clear();
       this.ipToNamespaceCache.clear();
 
-      // Fetch Services
+      // ── STEP 1: Populate IP ↔ node caches from K8s inventory.
+      //    We do NOT push any nodes/edges into the output here.
+      //    The graph is built ONLY from activeEdges (real observed traffic).
       const servicesRes: any = await k8sApi.listNamespacedService(namespace);
       const servicesItems = servicesRes.body ? servicesRes.body.items : servicesRes.items;
-      
-      // Fetch Pods
       const podsRes: any = await k8sApi.listNamespacedPod(namespace);
       const podsItems = podsRes.body ? podsRes.body.items : podsRes.items;
 
-      const nodes: Node[] = [];
-      const edges: Edge[] = [];
-
-      // First pass: build service IDs and hierarchy
-      const serviceIds = servicesItems.map((svc: any) => `svc-${svc.metadata.name}`);
-      const hierarchy = this.calculateServiceHierarchy(serviceIds);
-
-      // Group services by hierarchy level
-      const servicesByLevel = new Map<number, any[]>();
-      servicesItems.forEach((svc: any) => {
-        const svcId = `svc-${svc.metadata.name}`;
-        const level = hierarchy.get(svcId) || 1;
-        if (!servicesByLevel.has(level)) {
-          servicesByLevel.set(level, []);
-        }
-        servicesByLevel.get(level)!.push(svc);
-      });
-
-      // Vertical spacing: large gaps between levels (UI → API → Services → DB)
-      const levelSpacing = 400;
-      const startY = 100;
-      const canvasWidth = 2000;
-      const centerX = canvasWidth / 2;
-
-      // Position services hierarchically with clear visual levels
+      // Build all namespace service IP mappings
       servicesItems.forEach((svc: any) => {
         const svcId = `svc-${svc.metadata.name}`;
         const svcClusterIp = svc.spec?.clusterIP;
@@ -304,181 +280,101 @@ export class GraphService {
           this.ipToServiceCache.set(ip, svcId);
           if (svc.metadata?.namespace) this.ipToNamespaceCache.set(ip, svc.metadata.namespace);
         });
-
-        // Calculate position based on hierarchy level
-        const level = hierarchy.get(svcId) || 1;
-        const levelsServices = servicesByLevel.get(level) || [];
-        const indexInLevel = levelsServices.indexOf(svc);
-        const servicesInThisLevel = levelsServices.length;
-        
-        // Wider horizontal spacing for microservices level, narrower for gateways/databases
-        const horizontalSpacing = level === 1 ? 500 : 350;
-        const xOffset = centerX + (indexInLevel - (servicesInThisLevel - 1) / 2) * horizontalSpacing;
-        const yOffset = startY + level * levelSpacing;
-
-        nodes.push({
-          id: svcId,
-          type: 'custom',
-          position: { x: xOffset, y: yOffset },
-          data: {
-            label: svc.metadata.name,
-            type: 'service',
-            rps: 0,
-            latency: '0ms',
-            errorRate: 0,
-            ip: svcClusterIp || externalIps[0] || lbIngressIps[0] || '',
-            namespace: svc.metadata?.namespace,
-          },
-        });
-
-        // Get selector for this service
-        const selector = svc.spec?.selector;
-        
-        // Find pods matching this service and position them below the service
-        const matchingPods: any[] = [];
-        podsItems.forEach((pod: any) => {
-          let matches = false;
-          if (selector) {
-            matches = Object.keys(selector).every(
-              key => pod.metadata.labels && pod.metadata.labels[key] === selector[key]
-            );
-          } else {
-            matches = pod.metadata.name.startsWith(svc.metadata.name);
-          }
-
-          if (matches) {
-            matchingPods.push(pod);
-          }
-        });
-
-        // Position pods vertically below service
-        matchingPods.forEach((pod, podIndex) => {
-          const podId = `pod-${pod.metadata.name}`;
-          // Avoid duplicate pods
-          if (!nodes.find(n => n.id === podId)) {
-            nodes.push({
-              id: podId,
-              type: 'custom',
-              position: { 
-                x: xOffset + (podIndex - (matchingPods.length - 1) / 2) * 60, 
-                y: yOffset + 150 
-              },
-              data: {
-                label: pod.metadata.name,
-                type: 'pod',
-                rps: 0,
-                latency: '0ms',
-                errorRate: 0,
-                status: pod.status?.phase,
-              },
-            });
-          }
-
-          if (pod.status?.podIP) {
-            this.ipToServiceCache.set(pod.status.podIP, svcId);
-            this.podCache.set(pod.status.podIP, podId);
-            if (pod.metadata?.namespace) this.ipToNamespaceCache.set(pod.status.podIP, pod.metadata.namespace);
-          }
-
-          // Connect Pod to Service with service reference
-          edges.push({
-            id: `e-${podId}-${svcId}`,
-            source: podId,
-            target: svcId,
-            animated: true,
-            style: { stroke: '#9ca3af' },
-            data: { isStructural: true }
-          });
-        });
       });
 
-      // Add any orphaned pods (not matching any service)
-      const maxLevel = Math.max(...Array.from(hierarchy.values()), 2);
-      let orphanYOffset = startY + (maxLevel + 1) * levelSpacing;
+      // Build all pod IP mappings
       podsItems.forEach((pod: any) => {
+        const svcId = this.getServiceForPod(pod, servicesItems);
         const podId = `pod-${pod.metadata.name}`;
-        
         if (pod.status?.podIP) {
+          if (svcId) this.ipToServiceCache.set(pod.status.podIP, svcId);
           this.podCache.set(pod.status.podIP, podId);
           if (pod.metadata?.namespace) this.ipToNamespaceCache.set(pod.status.podIP, pod.metadata.namespace);
         }
+      });
 
-        if (!nodes.find(n => n.id === podId)) {
+      // ── STEP 2: Build graph ONLY from real traffic (activeEdges).
+      const nodes: Node[] = [];
+      const edges: Edge[] = [];
+
+      // Build a lookup map of all k8s service metadata by svcId
+      const svcMeta = new Map<string, any>();
+      servicesItems.forEach((svc: any) => svcMeta.set(`svc-${svc.metadata.name}`, svc));
+
+      // Build a lookup map of all k8s pod metadata by podId
+      const podMeta = new Map<string, any>();
+      podsItems.forEach((pod: any) => podMeta.set(`pod-${pod.metadata.name}`, pod));
+
+      // Only nodes that appear in activeEdges get added to the output
+      const activeNodeIds = new Set<string>();
+      this.activeEdges.forEach((edge) => {
+        if (!edge.data?.isStructural) {
+          activeNodeIds.add(edge.source);
+          activeNodeIds.add(edge.target);
+        }
+      });
+
+      // For each active node, generate a rich node object
+      activeNodeIds.forEach((nodeId) => {
+        const existing = nodes.find((n) => n.id === nodeId);
+        if (existing) return;
+
+        if (nodeId.startsWith('svc-')) {
+          const svc = svcMeta.get(nodeId);
           nodes.push({
-            id: podId,
-            type: 'custom',
-            position: { x: centerX - 200 + (orphanYOffset % 400), y: orphanYOffset },
+            id: nodeId,
+            type: 'service',
+            position: { x: 0, y: 0 }, // layout will recalculate on frontend
             data: {
-              label: pod.metadata.name,
-              type: 'pod',
-              rps: 0,
-              latency: '0ms',
-              errorRate: 0,
-              status: pod.status?.phase,
+              label: svc?.metadata?.name || nodeId.replace('svc-', ''),
+              type: 'service',
+              rps: 0, latency: '0ms', errorRate: 0,
+              ip: svc?.spec?.clusterIP || '',
+              namespace: svc?.metadata?.namespace || namespace,
             },
           });
-          orphanYOffset += 150;
-        }
-      });
-
-      // Clear old DB cache and mapping for this namespace (in real app, we'd scope by ns)
-      
-      // Inject dynamically discovered DBs and position them at database level
-      let dbIndex = 0;
-      const dbsByType = new Map<string, Node[]>();
-      Array.from(this.discoveredDbs.values()).forEach(dbNode => {
-        // Reposition discovered databases at the database level (level 2)
-        const dbType = dbNode.data?.label?.split(' ')[0] || 'unknown';
-        if (!dbsByType.has(dbType)) {
-          dbsByType.set(dbType, []);
-        }
-        dbsByType.get(dbType)!.push(dbNode);
-      });
-
-      let currentDbIndex = 0;
-      dbsByType.forEach((dbs, type) => {
-        dbs.forEach((db, idx) => {
-          const totalDbs = Array.from(this.discoveredDbs.values()).length;
-          const xOffset = centerX + (idx - (dbs.length - 1) / 2) * 250;
-          const yOffset = startY + 2 * levelSpacing;
-          db.position = { x: xOffset, y: yOffset };
-          nodes.push(db);
-        });
-      });
-
-      // Inject active telemetry edges
-      Array.from(this.activeEdges.values()).forEach(edge => {
-        const sourceExists = nodes.find(n => n.id === edge.source);
-        const targetExists = nodes.find(n => n.id === edge.target);
-        
-        if (!sourceExists) {
+        } else if (nodeId.startsWith('pod-')) {
+          const pod = podMeta.get(nodeId);
           nodes.push({
-            id: edge.source,
-            type: 'custom',
-            position: { x: centerX + (Math.random() * 400 - 200), y: startY - 200 },
+            id: nodeId,
+            type: 'pod',
+            position: { x: 0, y: 0 },
             data: {
-              label: edge.data?.sourceService || edge.data?.sourcePod || edge.source.replace(/^(pod|svc|ext)-/, ''),
-              type: edge.source.startsWith('svc-') ? 'service' : edge.source.startsWith('ext-') ? 'gateway' : 'pod',
+              label: pod?.metadata?.name || nodeId.replace('pod-', ''),
+              type: 'pod',
               rps: 0, latency: '0ms', errorRate: 0,
-              namespace: 'external'
-            }
+              ip: pod?.status?.podIP || '',
+              namespace: pod?.metadata?.namespace || namespace,
+              status: pod?.status?.phase || 'Unknown',
+            },
+          });
+        } else if (nodeId.startsWith('db-')) {
+          const dbNode = this.discoveredDbs.get(nodeId);
+          nodes.push(dbNode || {
+            id: nodeId,
+            type: 'db',
+            position: { x: 0, y: 0 },
+            data: { label: nodeId.replace(/^db-[^-]+-/, '').toUpperCase() + ' DB', type: 'db', rps: 0, latency: '0ms', errorRate: 0 },
+          });
+        } else if (nodeId.startsWith('ext-')) {
+          const extNode = this.discoveredDbs.get(nodeId);
+          nodes.push(extNode || {
+            id: nodeId,
+            type: 'external',
+            position: { x: 0, y: 0 },
+            data: { label: nodeId.replace('ext-', ''), type: 'external', rps: 0, latency: '0ms', errorRate: 0, namespace: 'external' },
           });
         }
-        if (!targetExists) {
-          nodes.push({
-            id: edge.target,
-            type: 'custom',
-            position: { x: centerX + (Math.random() * 400 - 200), y: startY + 600 },
-            data: {
-              label: edge.data?.destService || edge.data?.destPod || edge.target.replace(/^(pod|svc|ext)-/, ''),
-              type: edge.target.startsWith('svc-') ? 'service' : edge.target.startsWith('ext-') ? 'gateway' : 'pod',
-              rps: 0, latency: '0ms', errorRate: 0,
-              namespace: 'external'
-            }
-          });
+      });
+
+      // Emit all activeEdges (skip structural—those only show when there's real traffic)
+      this.activeEdges.forEach((edge) => {
+        if (edge.data?.isStructural) return;
+        const sourceExists = nodes.find((n) => n.id === edge.source);
+        const targetExists = nodes.find((n) => n.id === edge.target);
+        if (sourceExists && targetExists) {
+          edges.push(edge);
         }
-        
-        edges.push(edge);
       });
 
       // store into cache (best-effort)
@@ -493,6 +389,19 @@ export class GraphService {
       console.error('Error fetching graph data from K8s', error);
       return { nodes: [], edges: [] };
     }
+  }
+
+  // Helper: find the service ID that owns a pod (by label selector match)
+  private getServiceForPod(pod: any, servicesItems: any[]): string | undefined {
+    for (const svc of servicesItems) {
+      const selector = svc.spec?.selector;
+      if (!selector || Object.keys(selector).length === 0) continue;
+      const matches = Object.keys(selector).every(
+        (key) => pod.metadata?.labels?.[key] === selector[key]
+      );
+      if (matches) return `svc-${svc.metadata.name}`;
+    }
+    return undefined;
   }
 
   async processTelemetry(payload: {
