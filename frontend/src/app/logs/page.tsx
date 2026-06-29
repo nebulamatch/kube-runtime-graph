@@ -16,8 +16,6 @@ import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import CloseIcon from '@mui/icons-material/Close';
 import { apiUrl, socketUrl } from '../../lib/backend';
-import { LogsIcon } from 'lucide-react';
-
 interface Pod {
   name: string;
   status: string;
@@ -219,11 +217,151 @@ export default function LogsPage() {
     URL.revokeObjectURL(url);
   };
 
+
+  const renderPods = () => {
+    return (
+      <div className='bg-white/3 rounded-2xl'>
+        <div className="p-4 border-b border-white/8 ">
+          <Typography variant="h3" className="text-sm uppercase tracking-[0.22em] text-outline-variant mb-3">
+            PODS
+          </Typography>
+          <div className="relative">
+            <SearchIcon fontSize="small" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
+            <input
+              value={podSearch}
+              onChange={(e) => setPodSearch(e.target.value)}
+              placeholder="Search pods..."
+              className="w-full rounded-2xl bg-surface-container-lowest border border-white/8 pl-10 pr-3 py-2 text-sm text-on-surface outline-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto terminal-scroll p-3 space-y-2">
+          {loadingPods ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : filteredPods.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center text-outline gap-2 text-center p-6">
+              <InfoOutlinedIcon fontSize="small" />
+              <Typography variant="body" className="text-xs">No pods found in this namespace.</Typography>
+            </div>
+          ) : (
+            filteredPods.map((pod) => {
+              const ready = pod.status === 'Running';
+              const isSelected = selectedPod === pod.name;
+              return (
+                <button
+                  key={pod.name}
+                  onClick={() => setSelectedPod(pod.name)}
+                  className={`w-full text-left rounded-2xl border px-3 py-3 transition-all ${isSelected
+                    ? 'border-primary/30 bg-primary/10 shadow-[0_0_0_1px_rgba(173,198,255,0.08)]'
+                    : 'border-white/5 bg-surface-container-lowest/40 hover:bg-white/5'
+                    }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-sm text-on-surface truncate">{pod.name}</div>
+                      <div className="text-[11px] text-outline-variant mt-1">{pod.namespace}</div>
+                    </div>
+                    <span className={`w-2.5 h-2.5 rounded-full ${ready ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-[11px] text-outline-variant">
+                    <span>{pod.status}</span>
+                    <span>{pod.readyContainers ?? 0}/{pod.totalContainers ?? 0}</span>
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const renderLogs = () => {
+    return (
+      <div className='rounded-2xl'>
+        <div className="border-b border-white/8 bg-[#12151b] px-5 py-3 flex flex-wrap items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-outline-variant">
+            Severity
+          </div>
+          {(['INFO', 'WARN', 'ERROR', 'DEBUG', 'TRACE', 'SYSTEM'] as const).map((level) => (
+            <button
+              key={level}
+              onClick={() => toggleLevel(level)}
+              className={`rounded-xl border px-3 py-2 text-[11px] font-semibold tracking-wide ${selectedLevels.includes(level) ? levelStyles[level].pill : 'border-white/8 bg-transparent text-outline-variant'
+                }`}
+            >
+              {level}
+            </button>
+          ))}
+
+          <div className="relative flex-1 min-w-[220px] ml-auto">
+            <SearchIcon fontSize="small" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
+            <input
+              value={logSearch}
+              onChange={(e) => setLogSearch(e.target.value)}
+              placeholder="Filter with Regex..."
+              className="w-full rounded-xl bg-surface-container-lowest border border-white/8 pl-10 pr-3 py-2 text-sm text-on-surface outline-none"
+            />
+          </div>
+        </div>
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="px-5 py-2 border-b border-white/8 bg-[#11151a] flex items-center justify-between shrink-0">
+            <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant">Stream</div>
+            <div className="text-[11px] text-outline-variant">Showing {visibleEntries.length} entries</div>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto terminal-scroll bg-[#0d1014] px-5 py-4 overscroll-contain">
+            {
+              visibleEntries.length == 0 ? (
+                <div className="h-full flex items-center justify-center text-outline text-sm">
+                  No logs matching filter / wait for stream
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2 font-mono text-[12px] leading-relaxed">
+                    {
+
+                      visibleEntries.map((entry) => {
+                        const style = levelStyles[entry.level];
+                        const isMarked = markedTimestamp === entry.timestamp;
+                        return (
+                          <div key={entry.id} className={`rounded-2xl border ${style.border} px-4 py-3 ${isMarked ? 'bg-primary/15 border-primary/40' : 'bg-white/3'}`}>
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold ${style.pill}`}>
+                                  {entry.level}
+                                </span>
+                                <span className="text-[11px] text-outline-variant">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                              </div>
+                              <button
+                                onClick={() => handleMarkEndpoint(entry.timestamp)}
+                                className={`px-2 py-0.5 rounded-md text-[10px] border transition-colors ${isMarked ? 'border-primary/40 bg-primary/10 text-primary-fixed' : 'border-white/8 bg-white/3 text-outline-variant hover:bg-white/5'}`}
+                                title="Mark this timestamp to search nearby logs"
+                              >
+                                📍
+                              </button>
+                            </div>
+                            <div className="whitespace-pre-wrap break-all text-on-surface">{entry.text}</div>
+                          </div>
+                        );
+                      })
+                    }
+                  </div>
+                </>
+              )
+            }
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <DashboardLayout>
-      <div className="h-full flex flex-col p-6 overflow-hidden bg-gradient-to-b from-surface to-surface-container-lowest">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4 shrink-0">
+      <div className="h-full flex flex-col p-6 overflow-hidden bg-linear-to-b from-surface to-surface-container-lowest">
+        <div className="flex items-center justify-between mb-5">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <TerminalIcon className="text-primary" fontSize="small" />
@@ -264,7 +402,7 @@ export default function LogsPage() {
                 >
                   Auto-scroll: {autoScroll ? 'ON' : 'OFF'}
                 </button>
-                <button
+                {/* <button
                   onClick={() => {
                     setShowContext((v) => !v);
                     setActionsOpen(false);
@@ -273,7 +411,7 @@ export default function LogsPage() {
                 >
                   {showContext ? <CloseIcon fontSize="small" /> : <InfoOutlinedIcon fontSize="small" />}
                   {showContext ? 'Hide Context' : 'Show Context'}
-                </button>
+                </button> */}
                 <button onClick={() => { copyLogs(); setActionsOpen(false); }} className="flex items-center gap-2 px-4 py-3 text-xs border-b border-white/5 text-on-surface hover:bg-white/5">
                   <ContentCopyIcon fontSize="small" /> Copy
                 </button>
@@ -289,9 +427,8 @@ export default function LogsPage() {
               </div>
             )}
           </div>
-        </div>
 
-        {/* Advanced Filters */}
+        </div>
         <div className="mb-4 rounded-2xl border border-white/6 bg-surface-container-low/50 px-4 py-3 backdrop-blur-sm shrink-0">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
@@ -344,215 +481,13 @@ export default function LogsPage() {
             )}
           </div>
         </div>
-
-        <div className={`flex-1 min-h-0 grid gap-4 ${showContext ? 'grid-cols-[280px_minmax(0,1fr)_320px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
-          <aside className="min-h-0 rounded-3xl border border-white/6 bg-[#12151b] shadow-2xl shadow-black/20 flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-white/8 bg-white/3">
-              <Typography variant="h3" className="text-sm uppercase tracking-[0.22em] text-outline-variant mb-3">
-                PODS
-              </Typography>
-              <div className="relative">
-                <SearchIcon fontSize="small" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
-                <input
-                  value={podSearch}
-                  onChange={(e) => setPodSearch(e.target.value)}
-                  placeholder="Search pods..."
-                  className="w-full rounded-2xl bg-surface-container-lowest border border-white/8 pl-10 pr-3 py-2 text-sm text-on-surface outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto terminal-scroll p-3 space-y-2">
-              {loadingPods ? (
-                <div className="flex h-full items-center justify-center">
-                  <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                </div>
-              ) : filteredPods.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center text-outline gap-2 text-center p-6">
-                  <InfoOutlinedIcon fontSize="small" />
-                  <Typography variant="body" className="text-xs">No pods found in this namespace.</Typography>
-                </div>
-              ) : (
-                filteredPods.map((pod) => {
-                  const ready = pod.status === 'Running';
-                  const isSelected = selectedPod === pod.name;
-                  return (
-                    <button
-                      key={pod.name}
-                      onClick={() => setSelectedPod(pod.name)}
-                      className={`w-full text-left rounded-2xl border px-3 py-3 transition-all ${isSelected
-                        ? 'border-primary/30 bg-primary/10 shadow-[0_0_0_1px_rgba(173,198,255,0.08)]'
-                        : 'border-white/5 bg-surface-container-lowest/40 hover:bg-white/5'
-                        }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-semibold text-sm text-on-surface truncate">{pod.name}</div>
-                          <div className="text-[11px] text-outline-variant mt-1">{pod.namespace}</div>
-                        </div>
-                        <span className={`w-2.5 h-2.5 rounded-full ${ready ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                      </div>
-                      <div className="mt-2 flex items-center justify-between text-[11px] text-outline-variant">
-                        <span>{pod.status}</span>
-                        <span>{pod.readyContainers ?? 0}/{pod.totalContainers ?? 0}</span>
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </aside>
-
-          <section className="min-h-0 rounded-3xl border border-white/6 bg-[#0f1217] shadow-2xl shadow-black/20 overflow-hidden flex flex-col">
-            <div className="border-b border-white/8 bg-[#12151b] px-5 py-3 flex flex-wrap items-center gap-3 shrink-0">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-outline-variant">
-                Severity
-              </div>
-              {(['INFO', 'WARN', 'ERROR', 'DEBUG', 'TRACE', 'SYSTEM'] as const).map((level) => (
-                <button
-                  key={level}
-                  onClick={() => toggleLevel(level)}
-                  className={`rounded-xl border px-3 py-2 text-[11px] font-semibold tracking-wide ${selectedLevels.includes(level) ? levelStyles[level].pill : 'border-white/8 bg-transparent text-outline-variant'
-                    }`}
-                >
-                  {level}
-                </button>
-              ))}
-
-              <div className="relative flex-1 min-w-[220px] ml-auto">
-                <SearchIcon fontSize="small" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
-                <input
-                  value={logSearch}
-                  onChange={(e) => setLogSearch(e.target.value)}
-                  placeholder="Filter with Regex..."
-                  className="w-full rounded-xl bg-surface-container-lowest border border-white/8 pl-10 pr-3 py-2 text-sm text-on-surface outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="flex-1 min-h-0 flex flex-col">
-              <div className="px-5 py-2 border-b border-white/8 bg-[#11151a] flex items-center justify-between shrink-0">
-                <div className="text-[11px] uppercase tracking-[0.2em] text-outline-variant">Stream</div>
-                <div className="text-[11px] text-outline-variant">Showing {visibleEntries.length} entries</div>
-              </div>
-
-              <div className="flex-1 min-h-0 overflow-y-auto terminal-scroll bg-[#0d1014] px-5 py-4 overscroll-contain">
-                {visibleEntries.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-outline text-sm">
-                    No logs matching filter / wait for stream
-                  </div>
-                ) : (
-                  <div className="space-y-2 font-mono text-[12px] leading-relaxed">
-                    {visibleEntries.map((entry) => {
-                      const style = levelStyles[entry.level];
-                      const isMarked = markedTimestamp === entry.timestamp;
-                      return (
-                        <div key={entry.id} className={`rounded-2xl border ${style.border} px-4 py-3 ${isMarked ? 'bg-primary/15 border-primary/40' : 'bg-white/3'}`}>
-                          <div className="flex items-center justify-between gap-3 mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold ${style.pill}`}>
-                                {entry.level}
-                              </span>
-                              <span className="text-[11px] text-outline-variant">{new Date(entry.timestamp).toLocaleTimeString()}</span>
-                            </div>
-                            <button
-                              onClick={() => handleMarkEndpoint(entry.timestamp)}
-                              className={`px-2 py-0.5 rounded-md text-[10px] border transition-colors ${isMarked ? 'border-primary/40 bg-primary/10 text-primary-fixed' : 'border-white/8 bg-white/3 text-outline-variant hover:bg-white/5'}`}
-                              title="Mark this timestamp to search nearby logs"
-                            >
-                              📍
-                            </button>
-                          </div>
-                          <div className="whitespace-pre-wrap break-all text-on-surface">{entry.text}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                <div ref={logsEndRef} />
-              </div>
-
-              <div className="px-5 py-3 border-t border-white/8 bg-[#11151a] flex items-center justify-between text-[11px] text-outline-variant shrink-0">
-                <span>{isLive ? 'Streaming logs' : 'Paused'}</span>
-                <span>{selectedPod || 'No pod selected'}</span>
-              </div>
-            </div>
-          </section>
-
-          {showContext && (
-            <aside className="min-h-0 rounded-3xl border border-white/6 bg-[#101419] shadow-2xl shadow-black/20 flex flex-col overflow-y-auto terminal-scroll overscroll-contain">
-              <div className="p-5 border-b border-white/8 shrink-0">
-                <Typography variant="h3" className="text-xs uppercase tracking-[0.24em] text-outline-variant mb-3">
-                  Pod Context
-                </Typography>
-                <div className="rounded-3xl overflow-hidden border border-white/8 bg-surface-container-lowest">
-                  <div className="h-28 bg-[radial-gradient(circle_at_center,rgba(173,198,255,0.18),rgba(16,20,25,0.9))] flex items-center justify-center">
-                    <div className="w-20 h-20 rounded-2xl bg-[#0f141b] border border-white/10 flex items-center justify-center text-primary shadow-[0_0_30px_rgba(173,198,255,0.12)]">
-                      <TerminalIcon fontSize="large" />
-                    </div>
-                  </div>
-                  <div className="p-4 space-y-4">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-outline-variant mb-2">Identity</div>
-                      <div className="text-lg font-semibold text-on-surface break-words">{selectedPodDetails?.name || selectedPod || 'No pod selected'}</div>
-                      <div className="text-xs text-outline-variant mt-1">{selectedPodDetails?.status || 'Unknown'} • {selectedPodDetails?.namespace || selectedNamespace || 'default'}</div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div className="rounded-2xl border border-white/8 bg-white/3 p-3">
-                        <div className="text-outline-variant mb-1 uppercase tracking-[0.16em] text-[10px]">IP Address</div>
-                        <div className="text-on-surface font-semibold break-all">{selectedPodDetails?.ip || '—'}</div>
-                      </div>
-                      <div className="rounded-2xl border border-white/8 bg-white/3 p-3">
-                        <div className="text-outline-variant mb-1 uppercase tracking-[0.16em] text-[10px]">Restarts</div>
-                        <div className="text-on-surface font-semibold">{selectedPodDetails?.restarts ?? 0}</div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div className="rounded-2xl border border-white/8 bg-white/3 p-3">
-                        <div className="text-outline-variant mb-1 uppercase tracking-[0.16em] text-[10px]">Node</div>
-                        <div className="text-on-surface font-semibold break-words">{selectedPodDetails?.nodeName || '—'}</div>
-                      </div>
-                      <div className="rounded-2xl border border-white/8 bg-white/3 p-3">
-                        <div className="text-outline-variant mb-1 uppercase tracking-[0.16em] text-[10px]">Ready</div>
-                        <div className="text-on-surface font-semibold">{selectedPodDetails?.readyContainers ?? 0}/{selectedPodDetails?.totalContainers ?? 0}</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-5 border-b border-white/8 shrink-0">
-                <Typography variant="h3" className="text-xs uppercase tracking-[0.24em] text-outline-variant mb-3">
-                  Labels
-                </Typography>
-                <div className="flex flex-wrap gap-2">
-                  {selectedPodDetails?.labels && Object.keys(selectedPodDetails.labels).length > 0 ? (
-                    Object.entries(selectedPodDetails.labels).map(([key, value]) => (
-                      <span key={key} className="rounded-full border border-white/8 bg-white/4 px-3 py-1 text-[11px] text-outline-variant">
-                        {key}: {value}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-sm text-outline-variant">No labels found</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="p-5">
-                <Typography variant="h3" className="text-xs uppercase tracking-[0.24em] text-outline-variant mb-3">
-                  Log Tips
-                </Typography>
-                <div className="space-y-2 text-sm text-outline-variant">
-                  <div className="rounded-2xl border border-white/8 bg-white/3 p-3">Use the severity chips to isolate errors or warnings.</div>
-                  <div className="rounded-2xl border border-white/8 bg-white/3 p-3">Search matches the raw log text for fast triage.</div>
-                  <div className="rounded-2xl border border-white/8 bg-white/3 p-3">Pause live streaming before copying or downloading large output.</div>
-                </div>
-              </div>
-            </aside>
-          )}
-
+        <div className='flex gap-2'>
+          <div className="w-1/4">
+            {renderPods()}
+          </div>
+          <div className="w-3/4">
+            {renderLogs()}
+          </div>
         </div>
       </div>
     </DashboardLayout>

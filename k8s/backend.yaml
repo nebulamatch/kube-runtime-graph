@@ -73,8 +73,11 @@ kind: Service
 metadata:
   name: kube-runtime-graph-backend
   namespace: kube-system
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-resource-group: "MC_Discoun-Wiscount_discountwishcountaks_southeastasia"
 spec:
   type: LoadBalancer
+  loadBalancerIP: 20.24.134.134
   selector:
     app: kube-runtime-graph-backend
   ports:

@@ -433,6 +433,8 @@ export class GraphService {
       29615, // node-problem-detector
       8081, 8082, 8083, 8084, // konnectivity
       6443,  // Kubernetes API server
+      3000,  // Kube Runtime Graph Frontend
+      3001,  // Kube Runtime Graph Backend
     ]);
     if (SYSTEM_PORTS.has(payload.destPort)) return null;
 
@@ -456,12 +458,18 @@ export class GraphService {
     if (!sourceNodeId) {
       sourceNodeId = `ext-${payload.sourceIp}`;
       if (!this.discoveredDbs.has(sourceNodeId)) {
+        // We can parse headers to see if it's APIM
+        let label = 'External Client';
+        if (payload.headers && (payload.headers['x-apim-gateway'] || payload.headers['ocp-apim-subscription-key'])) {
+          label = 'Azure APIM';
+        }
+
         const extNode: Node = {
           id: sourceNodeId,
           type: 'custom',
           position: { x: Math.random() * 800, y: Math.random() * 200 },
           data: {
-            label: payload.sourceIp,
+            label: label,
             type: 'external',
             rps: 0,
             latency: '0ms',
